@@ -15,6 +15,7 @@ imgB = cv2.imread(config.CALIB_B)
 if imgA is None or imgB is None:
     raise SystemExit("Error: Could not load calibration images.")
 
+# Camera reference points
 camA_pts = np.array([
     [289, 577], [689, 156], [1102, 174], [1236, 680]
 ], np.float32)
@@ -22,14 +23,18 @@ camB_pts = np.array([
     [14, 691], [126, 233], [477, 207], [801, 544]
 ], np.float32)
 
+# World coordinates (arbitary right now)
 world_pts = np.array([
     [0, 0], [0, config.WORLD_H], [config.WORLD_W, config.WORLD_H], [config.WORLD_W, 0]
 ], np.float32)
 
+
+# Homography, image warping, grid
 H_A, H_B = vu.compute_homographies(camA_pts, camB_pts, world_pts)
 scale, margin = config.SCALE, config.MARGIN
 output_w = int(config.WORLD_W * scale) + margin * 2
 output_h = int(config.WORLD_H * scale) + margin * 2
+# Flip for top-down view
 S = np.array([
     [scale, 0, margin],
     [0, -scale, config.WORLD_H * scale + margin],
@@ -44,7 +49,7 @@ GRID_W, GRID_H = config.GRID_W, config.GRID_H
 cell_w = config.WORLD_W / GRID_W
 cell_h = config.WORLD_H / GRID_H
 
-# Draw grid for preview
+# Preview grid
 preview = topdown_photo.copy()
 for i in range(GRID_W + 1):
     x = int(margin + i * cell_w * scale)
@@ -90,6 +95,7 @@ bg_faint = vu.make_faint_background(bg_photo, alpha=0.18)
 
 print("Running YOLO... Press ESC to quit.")
 
+# Main YOLO loop
 while True:
     retA, frameA = capA.read()
     retB, frameB = capB.read()
@@ -111,17 +117,25 @@ while True:
 
     # === Camera A ===
     if retA:
+        # Run model
         resA = model(frameA, conf=0.3, classes=[0])
+        # Draw bounding box
         annotatedA = resA[0].plot()
+        # World grid overlay to camera
         annotatedA = vu.draw_world_grid_on_camera(
             annotatedA, H_invA, GRID_W, GRID_H, cell_w, cell_h,
             config.WORLD_W, config.WORLD_H, (0, 0, 255))
         cv2.imshow("Camera A", annotatedA)
 
+        # Each detection
         for box in resA[0].boxes.xyxy:
+            # Box coordinates
             x1, y1, x2, y2 = box.tolist()
+            # Bottom center point
             wx, wy = vu.project_to_world(((x1+x2)/2, y2), H_A)
+            # If detection is in plane
             if 0 <= wx <= config.WORLD_W and 0 <= wy <= config.WORLD_H:
+                # World coordinates to pixel coordinates
                 px, py = vu.world_to_topdown(wx, wy, S)
                 cv2.circle(topdown, (px, py), 5, (0, 0, 255), -1)
                 cv2.putText(topdown, f"({wx:.2f},{wy:.2f})", (px+6, py-6),

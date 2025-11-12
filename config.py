@@ -13,4 +13,4 @@ H_A_PATH = "data/H_A.npy"
 H_B_PATH = "data/H_B.npy"
 TOPDOWN_REF = "data/topdown_reference.jpg"
 
-SKIP_SECONDS = 200
+SKIP_SECONDS = 170
