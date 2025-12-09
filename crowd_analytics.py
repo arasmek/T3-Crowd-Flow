@@ -1,4 +1,3 @@
-# crowd_analytics.py
 import numpy as np
 import cv2
 from collections import defaultdict, deque
@@ -22,7 +21,7 @@ class CrowdFlowAnalyzer:
         self.last_positions = {}
         self.last_update_time = {}
         
-        # Flow field only (heatmap removed)
+        # Flow field
         self.flow_field_x = np.zeros((self.hmap_h, self.hmap_w), dtype=np.float32)
         self.flow_field_y = np.zeros((self.hmap_h, self.hmap_w), dtype=np.float32)
         self.flow_count = np.zeros((self.hmap_h, self.hmap_w), dtype=np.float32)
@@ -33,19 +32,15 @@ class CrowdFlowAnalyzer:
         self.frame_number = 0
         
     def world_to_heatmap(self, wx, wy):
-        """Convert world coordinates to heatmap cell indices."""
         hx = int(wx / self.cell_size)
         hy = int(wy / self.cell_size)
-        # Clamp to valid range
         hx = max(0, min(self.hmap_w - 1, hx))
         hy = max(0, min(self.hmap_h - 1, hy))
         return hx, hy
     
     def update(self, tracks):
-        """Update analyzer with new tracking data."""
         self.frame_number += 1
-        
-        # Decay flow fields
+
         self.flow_field_x *= config.HEATMAP_DECAY
         self.flow_field_y *= config.HEATMAP_DECAY
         self.flow_count *= config.HEATMAP_DECAY
@@ -59,18 +54,14 @@ class CrowdFlowAnalyzer:
             
             active_ids.add(track_id)
             self.total_count.add(track_id)
-            
-            # Update trajectory
             self.trajectories[track_id].append((wx, wy))
-            
-            # Calculate velocity
+
             if track_id in self.last_positions:
                 last_x, last_y = self.last_positions[track_id]
                 vx = wx - last_x
                 vy = wy - last_y
                 self.velocities[track_id] = (vx, vy)
-                
-                # Update flow field (movement direction)
+
                 hx, hy = self.world_to_heatmap(wx, wy)
                 self.flow_field_x[hy, hx] += vx
                 self.flow_field_y[hy, hx] += vy
@@ -78,8 +69,7 @@ class CrowdFlowAnalyzer:
             
             self.last_positions[track_id] = (wx, wy)
             self.last_update_time[track_id] = self.frame_number
-        
-        # Clean up old tracks (not seen for 30 frames)
+
         ids_to_remove = []
         for tid in list(self.trajectories.keys()):
             if tid not in active_ids:
@@ -93,15 +83,12 @@ class CrowdFlowAnalyzer:
             self.last_update_time.pop(tid, None)
     
     def get_trajectory(self, track_id):
-        """Get trajectory for a specific track."""
         return list(self.trajectories.get(track_id, []))
     
     def get_velocity(self, track_id):
-        """Get velocity vector for a track."""
         return self.velocities.get(track_id, (0, 0))
     
     def get_direction(self, track_id):
-        """Calculate dominant direction for a track's trajectory."""
         traj = self.get_trajectory(track_id)
         if len(traj) < config.MIN_TRAJECTORY_LENGTH:
             return None
@@ -113,7 +100,7 @@ class CrowdFlowAnalyzer:
         dy = end[1] - start[1]
         
         distance = np.sqrt(dx**2 + dy**2)
-        if distance < 0.01:  # Too small movement
+        if distance < 0.01:
             return None
         
         # Calculate angle in degrees
@@ -123,7 +110,6 @@ class CrowdFlowAnalyzer:
         return {'angle': angle, 'speed': speed, 'dx': dx, 'dy': dy}
     
     def predict_position(self, track_id, frames_ahead):
-        """Predict future position based on current velocity."""
         if track_id not in self.last_positions or track_id not in self.velocities:
             return None
         
@@ -140,18 +126,16 @@ class CrowdFlowAnalyzer:
         return (pred_x, pred_y)
     
     def get_flow_vectors(self):
-        """Get average flow direction for each cell."""
         vectors = []
         
         for hy in range(self.hmap_h):
             for hx in range(self.hmap_w):
                 if self.flow_count[hy, hx] > 0.5:
-                    # Average flow in this cell
                     avg_vx = self.flow_field_x[hy, hx] / self.flow_count[hy, hx]
                     avg_vy = self.flow_field_y[hy, hx] / self.flow_count[hy, hx]
                     
                     magnitude = np.sqrt(avg_vx**2 + avg_vy**2)
-                    if magnitude > 0.01:  # Only if significant movement
+                    if magnitude > 0.01:
                         wx = (hx + 0.5) * self.cell_size
                         wy = (hy + 0.5) * self.cell_size
                         
@@ -166,7 +150,6 @@ class CrowdFlowAnalyzer:
         return vectors
     
     def get_statistics(self):
-        """Get current statistics."""
         return {
             'current_count': self.current_count,
             'total_unique': len(self.total_count)

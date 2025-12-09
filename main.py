@@ -1,4 +1,3 @@
-# main.py - Enhanced Crowd Flow Monitoring with DeepSORT
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,10 +6,6 @@ import config
 import vision_utils as vu
 from deepsort_tracker import MultiCameraTracker
 from crowd_analytics import CrowdFlowAnalyzer
-
-# ==============================================================
-# =============== CALIBRATION + GRID PREVIEW ===================
-# ==============================================================
 
 imgA = cv2.imread(config.CALIB_A)
 imgB = cv2.imread(config.CALIB_B)
@@ -69,9 +64,7 @@ plt.subplot(1,3,2); plt.imshow(cv2.cvtColor(imgB, cv2.COLOR_BGR2RGB)); plt.title
 plt.subplot(1,3,3); plt.imshow(cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)); plt.title("Top-down grid preview")
 plt.tight_layout(); plt.show()
 
-# ==============================================================
 # ========== DEEPSORT TRACKING + CROWD ANALYTICS ===============
-# ==============================================================
 
 print("Initializing YOLO and DeepSORT...")
 model = YOLO(config.YOLO_MODEL_PATH)
@@ -115,7 +108,7 @@ while True:
     frame_count += 1
     tracks_A, tracks_B = [], []
     
-    # === Camera A Detection & Tracking ===
+    # Camera A Detection & Tracking
     if retA:
         resA = model.track(frameA, conf=config.DETECTION_CONFIDENCE, 
                           classes=[0], persist=False, verbose=False)
@@ -126,7 +119,7 @@ while True:
                 (config.WORLD_W, config.WORLD_H)
             )
     
-    # === Camera B Detection & Tracking ===
+    # Camera B Detection & Tracking
     if retB:
         resB = model.track(frameB, conf=config.DETECTION_CONFIDENCE,
                           classes=[0], persist=False, verbose=False)
@@ -137,23 +130,22 @@ while True:
                 (config.WORLD_W, config.WORLD_H)
             )
     
-    # === Merge tracks and update analytics ===
+    # Merge tracks and update analytics
     all_tracks = tracker.merge_camera_tracks(tracks_A, tracks_B)
     analyzer.update(all_tracks)
     
-    # Create a lookup dict for global IDs - include all local IDs from merged tracks
+    # Create a lookup dict for global IDs
     global_id_map = {}
     for track in all_tracks:
         global_id_map[track.local_id] = track.global_id
-        # If track was merged, map both camera IDs to the same global ID
         if hasattr(track, 'merged_from'):
             for local_id in track.merged_from:
                 global_id_map[local_id] = track.global_id
     
-    # === Display camera views - FIXED: Only show tracks from respective cameras ===
+    # Display camera views
     if retA:
         annotatedA = frameA.copy()
-        for track in tracks_A:  # Only show tracks from camera A
+        for track in tracks_A:
             ltrb = track.ltrb
             x1, y1, x2, y2 = map(int, ltrb)
             
@@ -209,7 +201,7 @@ while True:
             config.WORLD_W, config.WORLD_H, (200, 150, 100))
         cv2.imshow("Camera B", annotatedB)
     
-    # === Top-down visualization (no heatmap) ===
+    # Top-down visualization
     topdown = bg_faint.copy()
     
     # Draw grid
@@ -223,7 +215,7 @@ while True:
     vu.draw_axis_labels(topdown, GRID_W, GRID_H, cell_w, cell_h,
                        config.WORLD_W, config.WORLD_H, scale, margin)
     
-    # Draw flow vectors (predicted movement directions)
+    # Draw flow vectors
     if show_flow:
         flow_vectors = analyzer.get_flow_vectors()
         for vec in flow_vectors:
@@ -232,7 +224,7 @@ while True:
             # Scale arrow based on magnitude
             arrow_scale = min(vec['magnitude'] * 300, 50)
             end_x = int(px + vec['vx'] * arrow_scale)
-            end_y = int(py - vec['vy'] * arrow_scale)  # Negative because y is flipped
+            end_y = int(py - vec['vy'] * arrow_scale)
             
             cv2.arrowedLine(topdown, (px, py), (end_x, end_y),
                           (0, 255, 255), 2, tipLength=0.3)
@@ -335,9 +327,3 @@ while True:
 capA.release()
 capB.release()
 cv2.destroyAllWindows()
-
-print("\n" + "="*50)
-print("Final Statistics:")
-print("="*50)
-print(f"Total unique people tracked: {stats['total_unique']}")
-print("Done.")

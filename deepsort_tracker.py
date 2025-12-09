@@ -1,13 +1,10 @@
-# deepsort_tracker.py
 import numpy as np
 import cv2
 import torch
 from deep_sort_realtime.deepsort_tracker import DeepSort
 import config
 
-class MultiCameraTracker:
-    """Wrapper for DeepSORT tracking across multiple cameras."""
-    
+class MultiCameraTracker:  
     def __init__(self):
         # Initialize separate trackers for each camera
         self.tracker_A = DeepSort(
@@ -34,23 +31,10 @@ class MultiCameraTracker:
         
         # Global track ID mapping for merging
         self.global_id_counter = 0
-        self.world_position_history = {}  # track_id -> recent world positions
-        self.merged_ids = {}  # local_id -> global_id mapping
+        self.world_position_history = {}
+        self.merged_ids = {}
     
     def update_tracks(self, detections, frame, camera_id, homography, world_bounds):
-        """
-        Update tracks for a specific camera.
-        
-        Args:
-            detections: YOLO detection results
-            frame: Current frame image
-            camera_id: 'A' or 'B'
-            homography: Homography matrix for this camera
-            world_bounds: (world_w, world_h) tuple
-            
-        Returns:
-            List of Track objects with world coordinates (only those in bounds)
-        """
         tracker = self.tracker_A if camera_id == 'A' else self.tracker_B
         
         # Convert YOLO detections to DeepSORT format
@@ -78,7 +62,7 @@ class MultiCameraTracker:
             
             ltrb = track.to_ltrb()
             
-            # Calculate foot point (bottom center)
+            # Calculate foot point
             foot_x = (ltrb[0] + ltrb[2]) / 2
             foot_y = ltrb[3]
             
@@ -87,12 +71,10 @@ class MultiCameraTracker:
             world_pt = cv2.perspectiveTransform(pts, homography)[0, 0]
             
             wx, wy = float(world_pt[0]), float(world_pt[1])
-            
-            # FILTER: Only keep tracks within world bounds
+
             if not (0 <= wx <= world_w and 0 <= wy <= world_h):
                 continue
-            
-            # Create unique camera-specific ID
+
             local_id = f"{camera_id}_{track.track_id}"
             
             # Add attributes
@@ -106,7 +88,6 @@ class MultiCameraTracker:
             if local_id not in self.world_position_history:
                 self.world_position_history[local_id] = []
             self.world_position_history[local_id].append((wx, wy))
-            # Keep only last 10 positions
             if len(self.world_position_history[local_id]) > 10:
                 self.world_position_history[local_id].pop(0)
             
@@ -115,14 +96,10 @@ class MultiCameraTracker:
         return processed_tracks
     
     def merge_camera_tracks(self, tracks_A, tracks_B):
-        """
-        Intelligently merge tracks from both cameras.
-        Same person seen by both cameras gets one global ID.
-        """
         all_tracks = []
         matched_B = set()
         
-        # First pass: Match tracks between cameras based on world position
+        # Match tracks between cameras based on world position
         for track_A in tracks_A:
             best_match = None
             min_dist = float('inf')
@@ -130,20 +107,19 @@ class MultiCameraTracker:
             for i, track_B in enumerate(tracks_B):
                 if i in matched_B:
                     continue
-                
-                # Calculate distance in world coordinates
+
                 dist = np.sqrt(
                     (track_A.world_x - track_B.world_x)**2 + 
                     (track_A.world_y - track_B.world_y)**2
                 )
                 
                 # Find closest match within threshold
-                if dist < min_dist and dist < 0.5:  # 50cm threshold
+                if dist < min_dist and dist < 0.5:
                     min_dist = dist
                     best_match = i
             
             if best_match is not None:
-                # Merge: Average the positions for better accuracy
+                # Average the positions for better accuracy
                 track_B = tracks_B[best_match]
                 track_A.world_x = (track_A.world_x + track_B.world_x) / 2
                 track_A.world_y = (track_A.world_y + track_B.world_y) / 2

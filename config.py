@@ -1,4 +1,3 @@
-# config.py
 # World and grid settings
 WORLD_W, WORLD_H = 4.0, 3.0
 GRID_W, GRID_H = 20, 15
@@ -12,7 +11,7 @@ VIDEO_A = "data/camA.mp4"
 VIDEO_B = "data/camB.mp4"
 
 # Model paths
-YOLO_MODEL_PATH = "yolov8s.pt"  # For detection
+YOLO_MODEL_PATH = "yolov8s.pt"
 DEEPSORT_MODEL_PATH = "deep_sort/deep/checkpoint/ckpt.t7"
 
 # Homography paths
@@ -32,12 +31,12 @@ MAX_AGE = 70
 N_INIT = 3
 
 # Crowd flow analysis settings
-TRAJECTORY_HISTORY = 30  # frames to keep for each track
-MIN_TRAJECTORY_LENGTH = 5  # minimum points to calculate direction
-HEATMAP_DECAY = 0.95  # decay factor per frame
-HEATMAP_CELL_SIZE = 0.2  # meters per heatmap cell
-PREDICTION_HORIZON = 30  # frames to predict ahead
-VELOCITY_SMOOTHING_FRAMES = 5  # number of frames to average for velocity smoothing
+TRAJECTORY_HISTORY = 30
+MIN_TRAJECTORY_LENGTH = 5
+HEATMAP_DECAY = 0.95
+HEATMAP_CELL_SIZE = 0.2
+PREDICTION_HORIZON = 30
+VELOCITY_SMOOTHING_FRAMES = 5
 
 # Visualization settings
 SHOW_TRAJECTORIES = True
