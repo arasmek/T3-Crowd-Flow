@@ -64,3 +64,27 @@ def draw_axis_labels(topdown, grid_w, grid_h, cell_w, cell_h, world_w, world_h, 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1, cv2.LINE_AA)
 
     return topdown
+
+# ========== Top-down visualization ==========
+def draw_topdown(base_image, tracks, analyzer=None, draw_heatmap=True):
+    """
+    Draw tracks and optional crowd flow on top of a base image (warped camera overlay).
+    base_image: np.ndarray (BGR)
+    tracks: list of dicts with 'x', 'y' coordinates in top-down space
+    analyzer: optional CrowdFlowAnalyzer instance for heatmaps/arrows
+    draw_heatmap: whether to overlay heatmap/flow
+    """
+    img = base_image.copy()  # avoid modifying original
+
+    # Draw each track
+    for track in tracks:
+        x, y = int(track['x']), int(track['y'])
+        color = (0, 0, 255)  # red for tracked person
+        cv2.circle(img, (x, y), 5, color, -1)
+
+    # Optional: overlay crowd flow heatmap
+    if analyzer and draw_heatmap:
+        if hasattr(analyzer, "draw_flow"):
+            img = analyzer.draw_flow(img)
+
+    return img

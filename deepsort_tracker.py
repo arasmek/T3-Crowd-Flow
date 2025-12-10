@@ -95,6 +95,21 @@ class MultiCameraTracker:
         
         return processed_tracks
     
+    def update(self, detections_A, frame_A, homography_A, detections_B, frame_B, homography_B, world_bounds):
+        """
+        Unified update for both cameras.
+        detections_X: YOLO detections for camera X
+        frame_X: current frame of camera X
+        homography_X: homography matrix for camera X
+        world_bounds: (width, height) of the top-down map
+        Returns: list of merged track objects with .global_id, .world_x, .world_y
+        """
+        tracks_A = self.update_tracks(detections_A, frame_A, 'A', homography_A, world_bounds)
+        tracks_B = self.update_tracks(detections_B, frame_B, 'B', homography_B, world_bounds)
+
+        merged_tracks = self.merge_camera_tracks(tracks_A, tracks_B)
+        return merged_tracks
+    
     def merge_camera_tracks(self, tracks_A, tracks_B):
         all_tracks = []
         matched_B = set()
