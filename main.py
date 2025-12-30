@@ -12,7 +12,7 @@ imgB = cv2.imread(config.CALIB_B)
 if imgA is None or imgB is None:
     raise SystemExit("Error: Could not load calibration images.")
 
-# Camera reference points
+# Camera reference points (PREDETERMINED - from old version)
 camA_pts = np.array([
     [289, 577], [689, 156], [1102, 174], [1236, 680]
 ], np.float32)
@@ -64,9 +64,10 @@ plt.subplot(1,3,2); plt.imshow(cv2.cvtColor(imgB, cv2.COLOR_BGR2RGB)); plt.title
 plt.subplot(1,3,3); plt.imshow(cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)); plt.title("Top-down grid preview")
 plt.tight_layout(); plt.show()
 
-# ========== DEEPSORT TRACKING + CROWD ANALYTICS ===============
+# ========== DEEPSORT TRACKING + CROWD ANALYTICS + HEATMAP ===============
 
 print("Initializing YOLO and DeepSORT...")
+print(f"Optimization: Resizing frames to {config.INFERENCE_WIDTH}x{config.INFERENCE_HEIGHT} for inference")
 model = YOLO(config.YOLO_MODEL_PATH)
 tracker = MultiCameraTracker()
 analyzer = CrowdFlowAnalyzer(config.WORLD_W, config.WORLD_H, config.HEATMAP_CELL_SIZE)
@@ -92,11 +93,13 @@ if bg_photo is None:
     bg_photo = np.zeros((output_h, output_w, 3), np.uint8)
 bg_faint = vu.make_faint_background(bg_photo, alpha=0.18)
 
-print("Running DeepSORT tracking...")
-print("Controls: ESC=quit, 't'=toggle trajectories, 'f'=toggle flow vectors")
+print("Running DeepSORT tracking with heatmap...")
+print("Controls: ESC=quit, 't'=toggle trajectories, 'f'=toggle flow vectors, 'h'=toggle heatmap")
+print("          '+'/'-' adjust heatmap max people")
 frame_count = 0
 show_trajectories = config.SHOW_TRAJECTORIES
 show_flow = config.SHOW_VELOCITY_VECTORS
+show_heatmap = True
 
 # Main tracking loop
 while True:
@@ -110,23 +113,55 @@ while True:
     
     # Camera A Detection & Tracking
     if retA:
-        resA = model.track(frameA, conf=config.DETECTION_CONFIDENCE, 
+        # Resize frame for faster inference
+        frameA_resized, scale_x_A, scale_y_A = tracker.resize_frame_for_inference(frameA)
+        
+        # Run YOLO on resized frame
+        resA = model.track(frameA_resized, conf=config.DETECTION_CONFIDENCE, 
                           classes=[0], persist=False, verbose=False)
         
         if len(resA[0].boxes) > 0:
+            # Scale detections back to original frame coordinates
+            scaled_boxes = tracker.scale_detections(resA[0].boxes, scale_x_A, scale_y_A)
+            
+            # Create temporary detection objects with scaled coordinates
+            class ScaledBox:
+                def __init__(self, xyxy, conf):
+                    self.xyxy = [np.array(xyxy)]
+                    self.conf = [conf]
+            
+            scaled_detection_objects = [ScaledBox(box['xyxy'], box['conf']) for box in scaled_boxes]
+            
+            # Update tracker with original frame and scaled detections
             tracks_A = tracker.update_tracks(
-                resA[0].boxes, frameA, 'A', H_A, 
+                scaled_detection_objects, frameA, 'A', H_A, 
                 (config.WORLD_W, config.WORLD_H)
             )
     
     # Camera B Detection & Tracking
     if retB:
-        resB = model.track(frameB, conf=config.DETECTION_CONFIDENCE,
+        # Resize frame for faster inference
+        frameB_resized, scale_x_B, scale_y_B = tracker.resize_frame_for_inference(frameB)
+        
+        # Run YOLO on resized frame
+        resB = model.track(frameB_resized, conf=config.DETECTION_CONFIDENCE,
                           classes=[0], persist=False, verbose=False)
         
         if len(resB[0].boxes) > 0:
+            # Scale detections back to original frame coordinates
+            scaled_boxes = tracker.scale_detections(resB[0].boxes, scale_x_B, scale_y_B)
+            
+            # Create temporary detection objects with scaled coordinates
+            class ScaledBox:
+                def __init__(self, xyxy, conf):
+                    self.xyxy = [np.array(xyxy)]
+                    self.conf = [conf]
+            
+            scaled_detection_objects = [ScaledBox(box['xyxy'], box['conf']) for box in scaled_boxes]
+            
+            # Update tracker with original frame and scaled detections
             tracks_B = tracker.update_tracks(
-                resB[0].boxes, frameB, 'B', H_B,
+                scaled_detection_objects, frameB, 'B', H_B,
                 (config.WORLD_W, config.WORLD_H)
             )
     
@@ -149,10 +184,7 @@ while True:
             ltrb = track.ltrb
             x1, y1, x2, y2 = map(int, ltrb)
             
-            # Get global ID from the merged tracks
             global_id = global_id_map.get(track.local_id, "?")
-            
-            # Check if this track was merged
             merged_track = next((t for t in all_tracks if t.local_id == track.local_id), None)
             is_merged = merged_track and hasattr(merged_track, 'merged_from')
             
@@ -174,14 +206,11 @@ while True:
     
     if retB:
         annotatedB = frameB.copy()
-        for track in tracks_B:  # Only show tracks from camera B
+        for track in tracks_B:
             ltrb = track.ltrb
             x1, y1, x2, y2 = map(int, ltrb)
             
-            # Get global ID from the merged tracks
             global_id = global_id_map.get(track.local_id, "?")
-            
-            # Check if this track was merged
             merged_track = next((t for t in all_tracks if t.local_id == track.local_id), None)
             is_merged = merged_track and hasattr(merged_track, 'merged_from')
             
@@ -204,6 +233,58 @@ while True:
     # Top-down visualization
     topdown = bg_faint.copy()
     
+    # Draw heatmap overlay
+    if show_heatmap:
+        heatmap = analyzer.get_density_heatmap(smooth_sigma=2.5)
+        
+        # Create colored heatmap overlay
+        heatmap_colored = np.zeros((analyzer.hmap_h, analyzer.hmap_w, 3), dtype=np.uint8)
+        
+        # Apply colormap (hot colors for high density)
+        for hy in range(analyzer.hmap_h):
+            for hx in range(analyzer.hmap_w):
+                value = heatmap[hy, hx]
+                if value > 0:
+                    # Color gradient: blue -> green -> yellow -> red
+                    if value < 0.33:
+                        # Blue to green
+                        r = 0
+                        g = int(255 * (value / 0.33))
+                        b = int(255 * (1 - value / 0.33))
+                    elif value < 0.66:
+                        # Green to yellow
+                        r = int(255 * ((value - 0.33) / 0.33))
+                        g = 255
+                        b = 0
+                    else:
+                        # Yellow to red
+                        r = 255
+                        g = int(255 * (1 - (value - 0.66) / 0.34))
+                        b = 0
+                    
+                    heatmap_colored[hy, hx] = [b, g, r]
+        
+        # Resize heatmap to match topdown view dimensions
+        heatmap_resized = cv2.resize(
+            heatmap_colored,
+            (int(config.WORLD_W * scale), int(config.WORLD_H * scale)),
+            interpolation=cv2.INTER_LINEAR
+        )
+        
+        # Create overlay region
+        y_start = margin
+        y_end = margin + int(config.WORLD_H * scale)
+        x_start = margin
+        x_end = margin + int(config.WORLD_W * scale)
+        
+        # Blend heatmap with topdown
+        mask = (heatmap_resized.sum(axis=2) > 0).astype(np.uint8) * 255
+        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        
+        roi = topdown[y_start:y_end, x_start:x_end]
+        blended = cv2.addWeighted(roi, 0.6, heatmap_resized, 0.4, 0)
+        topdown[y_start:y_end, x_start:x_end] = np.where(mask > 0, blended, roi)
+    
     # Draw grid
     for i in range(GRID_W + 1):
         x = int(margin + i * cell_w * scale)
@@ -221,7 +302,6 @@ while True:
         for vec in flow_vectors:
             px, py = vu.world_to_topdown(vec['x'], vec['y'], S)
             
-            # Scale arrow based on magnitude
             arrow_scale = min(vec['magnitude'] * 300, 50)
             end_x = int(px + vec['vx'] * arrow_scale)
             end_y = int(py - vec['vy'] * arrow_scale)
@@ -234,40 +314,34 @@ while True:
         wx, wy = track.world_x, track.world_y
         px, py = vu.world_to_topdown(wx, wy, S)
         
-        # Color based on if merged from both cameras
         if hasattr(track, 'merged_from'):
-            color = (255, 0, 255)  # Magenta = seen by both cameras
+            color = (255, 0, 255)
             thickness = 3
         elif track.camera_id == 'A':
-            color = (0, 255, 0)  # Green = Camera A only
+            color = (0, 255, 0)
             thickness = 2
         else:
-            color = (255, 100, 0)  # Orange = Camera B only
+            color = (255, 100, 0)
             thickness = 2
         
-        # Draw position
         cv2.circle(topdown, (px, py), 8, color, thickness)
         cv2.circle(topdown, (px, py), 10, (255, 255, 255), 1)
         
-        # Draw ID
         cv2.putText(topdown, str(track.global_id), (px+12, py-8),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.putText(topdown, str(track.global_id), (px+12, py-8),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
         
-        # Draw trajectory
         if show_trajectories:
             trajectory = analyzer.get_trajectory(track.global_id)
             if len(trajectory) > 1:
                 for i in range(len(trajectory) - 1):
                     pt1 = vu.world_to_topdown(trajectory[i][0], trajectory[i][1], S)
                     pt2 = vu.world_to_topdown(trajectory[i+1][0], trajectory[i+1][1], S)
-                    # Fade older parts of trajectory
                     alpha = i / len(trajectory)
                     fade_color = tuple(int(c * (0.3 + 0.7 * alpha)) for c in color)
                     cv2.line(topdown, pt1, pt2, fade_color, 2)
         
-        # Draw predicted position
         pred_pos = analyzer.predict_position(track.global_id, config.PREDICTION_HORIZON)
         if pred_pos:
             pred_px, pred_py = vu.world_to_topdown(pred_pos[0], pred_pos[1], S)
@@ -280,18 +354,17 @@ while True:
         f"Frame: {frame_count}",
         f"People in grid: {stats['current_count']}",
         f"Total tracked: {stats['total_unique']}",
+        f"Heatmap range: {analyzer.heatmap_min_people}-{analyzer.heatmap_max_people}",
         "",
-        "t=trails | f=flow"
+        "t=trails | f=flow | h=heatmap",
+        "+/- adjust max people"
     ]
     
-    # Draw with background
     y_offset = 30
     for i, text in enumerate(info_text):
-        # Background rectangle
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
         cv2.rectangle(topdown, (8, y_offset + i*25 - 18), (tw + 12, y_offset + i*25 + 5),
                      (0, 0, 0), -1)
-        # Text
         cv2.putText(topdown, text, (10, y_offset + i*25),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.putText(topdown, text, (10, y_offset + i*25),
@@ -323,6 +396,15 @@ while True:
     elif key == ord('f'):
         show_flow = not show_flow
         print(f"Flow vectors: {'ON' if show_flow else 'OFF'}")
+    elif key == ord('h'):
+        show_heatmap = not show_heatmap
+        print(f"Heatmap: {'ON' if show_heatmap else 'OFF'}")
+    elif key == ord('+') or key == ord('='):
+        analyzer.heatmap_max_people += 1
+        print(f"Heatmap max: {analyzer.heatmap_max_people}")
+    elif key == ord('-') or key == ord('_'):
+        analyzer.heatmap_max_people = max(analyzer.heatmap_min_people + 1, analyzer.heatmap_max_people - 1)
+        print(f"Heatmap max: {analyzer.heatmap_max_people}")
 
 capA.release()
 capB.release()

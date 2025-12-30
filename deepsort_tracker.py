@@ -5,6 +5,14 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 import config
 
 class MultiCameraTracker:  
+
+    @staticmethod
+    def to_numpy(x):
+        """Convert torch tensor or numpy array to numpy array."""
+        if hasattr(x, "cpu"):
+            return x.cpu().numpy()
+        return x
+
     def __init__(self):
         # Initialize separate trackers for each camera
         self.tracker_A = DeepSort(
@@ -33,23 +41,78 @@ class MultiCameraTracker:
         self.global_id_counter = 0
         self.world_position_history = {}
         self.merged_ids = {}
+        
+        # Store original frame dimensions for coordinate scaling
+        self.original_dims = {'A': None, 'B': None}
+    
+    def resize_frame_for_inference(self, frame):
+        """
+        Resize frame for faster YOLO inference.
+        Returns resized frame and scale factors.
+        """
+        h_orig, w_orig = frame.shape[:2]
+        
+        if config.MAINTAIN_ASPECT_RATIO:
+            # Calculate scale to fit within target dimensions
+            scale = min(config.INFERENCE_WIDTH / w_orig, 
+                       config.INFERENCE_HEIGHT / h_orig)
+            new_w = int(w_orig * scale)
+            new_h = int(h_orig * scale)
+        else:
+            new_w = config.INFERENCE_WIDTH
+            new_h = config.INFERENCE_HEIGHT
+        
+        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        scale_x = w_orig / new_w
+        scale_y = h_orig / new_h
+        
+        return resized, scale_x, scale_y
+    
+    def scale_detections(self, boxes, scale_x, scale_y):
+        """Scale detection boxes back to original frame coordinates"""
+        scaled_boxes = []
+        for box in boxes:
+            xyxy = self.to_numpy(box.xyxy[0])
+            conf = float(self.to_numpy(box.conf[0]))
+
+            x1, y1, x2, y2 = xyxy
+            
+            # Scale back to original coordinates
+            x1_scaled = x1 * scale_x
+            y1_scaled = y1 * scale_y
+            x2_scaled = x2 * scale_x
+            y2_scaled = y2 * scale_y
+            
+            scaled_boxes.append({
+                'xyxy': [x1_scaled, y1_scaled, x2_scaled, y2_scaled],
+                'conf': conf
+            })
+        
+        return scaled_boxes
     
     def update_tracks(self, detections, frame, camera_id, homography, world_bounds):
         tracker = self.tracker_A if camera_id == 'A' else self.tracker_B
         
+        # Store original dimensions if not yet stored
+        if self.original_dims[camera_id] is None:
+            self.original_dims[camera_id] = frame.shape[:2]
+        
         # Convert YOLO detections to DeepSORT format
+        # Note: detections should already be in original frame coordinates
         det_list = []
         for box in detections:
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            conf = box.conf[0].cpu().numpy()
-            
+            xyxy = self.to_numpy(box.xyxy[0])
+            conf = float(self.to_numpy(box.conf[0]))
+
+            x1, y1, x2, y2 = xyxy
+
             det_list.append((
-                [float(x1), float(y1), float(x2-x1), float(y2-y1)],
-                float(conf),
-                0  # class: person
+                [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
+                conf,
+                0
             ))
         
-        # Update tracker
+        # Update tracker with original-resolution frame for embedding
         tracks = tracker.update_tracks(det_list, frame=frame)
         
         # Process tracks and filter to grid bounds

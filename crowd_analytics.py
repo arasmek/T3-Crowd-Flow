@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import cv2
 from collections import defaultdict, deque
 from scipy.ndimage import gaussian_filter
@@ -26,14 +26,26 @@ class CrowdFlowAnalyzer:
         self.flow_field_y = np.zeros((self.hmap_h, self.hmap_w), dtype=np.float32)
         self.flow_count = np.zeros((self.hmap_h, self.hmap_w), dtype=np.float32)
         
+        # Density heatmap for congestion
+        self.density_map = np.zeros((self.hmap_h, self.hmap_w), dtype=np.float32)
+        
+        # Heatmap configuration - UPDATED DEBUG VALUES
+        self.heatmap_min_people = 1  # Changed from 2 to 1
+        self.heatmap_max_people = 4  # Changed from 10 to 4
+        
         # Statistics
         self.current_count = 0
         self.total_count = set()
         self.frame_number = 0
         
+        print(f"[CrowdFlowAnalyzer] Initialized heatmap: {self.hmap_w}x{self.hmap_h} cells")
+        print(f"[CrowdFlowAnalyzer] World bounds: {self.world_w}x{self.world_h}")
+        print(f"[CrowdFlowAnalyzer] Cell size: {self.cell_size}")
+        
     def world_to_heatmap(self, wx, wy):
         hx = int(wx / self.cell_size)
-        hy = int(wy / self.cell_size)
+        hy = int((self.world_h - wy) / self.cell_size)  # ← FLIP Y
+
         hx = max(0, min(self.hmap_w - 1, hx))
         hy = max(0, min(self.hmap_h - 1, hy))
         return hx, hy
@@ -41,9 +53,13 @@ class CrowdFlowAnalyzer:
     def update(self, tracks):
         self.frame_number += 1
 
+        # Decay flow field
         self.flow_field_x *= config.HEATMAP_DECAY
         self.flow_field_y *= config.HEATMAP_DECAY
         self.flow_count *= config.HEATMAP_DECAY
+        
+        # Decay density map
+        self.density_map *= config.HEATMAP_DECAY
         
         self.current_count = len(tracks)
         active_ids = set()
@@ -56,13 +72,21 @@ class CrowdFlowAnalyzer:
             self.total_count.add(track_id)
             self.trajectories[track_id].append((wx, wy))
 
+            # Update density heatmap - FIX: Use correct coordinate system
+            hx, hy = self.world_to_heatmap(wx, wy)
+            
+            # DEBUG: Print first few updates to verify coordinates
+            if self.frame_number < 3:
+                print(f"[DEBUG] Track {track_id}: world({wx:.2f}, {wy:.2f}) -> heatmap({hx}, {hy})")
+            
+            self.density_map[hy, hx] += 1.0
+
             if track_id in self.last_positions:
                 last_x, last_y = self.last_positions[track_id]
                 vx = wx - last_x
                 vy = wy - last_y
                 self.velocities[track_id] = (vx, vy)
 
-                hx, hy = self.world_to_heatmap(wx, wy)
                 self.flow_field_x[hy, hx] += vx
                 self.flow_field_y[hy, hx] += vy
                 self.flow_count[hy, hx] += 1
@@ -148,6 +172,59 @@ class CrowdFlowAnalyzer:
                         })
         
         return vectors
+    
+    def get_density_heatmap(self, smooth_sigma=2.0):
+        """
+        Returns a smoothed density heatmap for visualization.
+        
+        Args:
+            smooth_sigma: Gaussian smoothing parameter for smooth heatmap
+            
+        Returns:
+            Smoothed density map normalized between 0 and 1
+        """
+        # Apply Gaussian filter for smooth heatmap
+        smoothed = gaussian_filter(self.density_map, sigma=smooth_sigma)
+        
+        # Normalize based on configurable min/max people
+        # Values below min_people will be 0, at max_people will be 1
+        normalized = np.clip(
+            (smoothed - self.heatmap_min_people) / (self.heatmap_max_people - self.heatmap_min_people),
+            0, 1
+        )
+        
+        return normalized
+    
+    def set_heatmap_range(self, min_people, max_people):
+        """Set the range for heatmap visualization"""
+        self.heatmap_min_people = min_people
+        self.heatmap_max_people = max_people
+    
+    def get_congestion_zones(self, threshold=0.7):
+        """
+        Identify high-density congestion zones.
+        
+        Args:
+            threshold: Density threshold (0-1) to classify as congested
+            
+        Returns:
+            List of congestion zone centers in world coordinates
+        """
+        heatmap = self.get_density_heatmap()
+        congestion_zones = []
+        
+        for hy in range(self.hmap_h):
+            for hx in range(self.hmap_w):
+                if heatmap[hy, hx] >= threshold:
+                    wx = (hx + 0.5) * self.cell_size
+                    wy = (hy + 0.5) * self.cell_size
+                    congestion_zones.append({
+                        'x': wx,
+                        'y': wy,
+                        'density': heatmap[hy, hx]
+                    })
+        
+        return congestion_zones
     
     def get_statistics(self):
         return {
