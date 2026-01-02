@@ -106,6 +106,16 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_layout.addWidget(self.conf_slider)
         controls_layout.addWidget(self.conf_label)
 
+        controls_layout.addWidget(QtWidgets.QLabel("Heatmap Max:"))
+        self.heatmap_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.heatmap_slider.setRange(1, 20)
+        self.heatmap_slider.setValue(5)
+        self.heatmap_slider.setMaximumWidth(150)
+        self.heatmap_label = QtWidgets.QLabel("5")
+        self.heatmap_slider.valueChanged.connect(self.on_heatmap_change)
+        controls_layout.addWidget(self.heatmap_slider)
+        controls_layout.addWidget(self.heatmap_label)
+
         # Control buttons
         buttons_layout = QtWidgets.QHBoxLayout()
         main_layout.addLayout(buttons_layout)
@@ -532,6 +542,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.show_heatmap = not self.worker.show_heatmap
         status = "ON" if self.worker.show_heatmap else "OFF"
         self.update_status(f"Heatmap: {status}")
+
+    def on_heatmap_change(self, value):
+        self.heatmap_label.setText(str(value))
+        self.worker.crowd_analyzer.heatmap_max_people = value
 
     def on_finished(self):
         """Handle processing finished"""

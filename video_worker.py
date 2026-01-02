@@ -54,18 +54,12 @@ class VideoWorker(QtCore.QObject):
             [0, 0, 1]
         ], np.float32)
         
-        # Load background with error handling
-        try:
-            logger.info(f"Loading background image: {config.TOPDOWN_REF}")
-            self.bg_photo = cv2.imread(config.TOPDOWN_REF)
-            if self.bg_photo is None:
-                raise ValueError("Could not load background image")
-            logger.info(f"Background loaded: shape={self.bg_photo.shape}")
-        except Exception as e:
-            logger.warning(f"Could not load background image: {e}")
-            self.bg_photo = np.zeros((self.output_h, self.output_w, 3), np.uint8)
+        # Create blank dark background instead of loading image
+        self.bg_photo = np.zeros((self.output_h, self.output_w, 3), np.uint8)
+        self.bg_photo[:] = (30, 30, 30)  # Dark gray background
+        self.bg_faint = self.bg_photo.copy()
+        logger.info("Using blank background for top-down view")
         
-        self.bg_faint = vu.make_faint_background(self.bg_photo, alpha=0.18)
         self.tracker = MultiCameraTracker()
         
         # Initialize tracker dictionaries if they don't exist
@@ -81,6 +75,8 @@ class VideoWorker(QtCore.QObject):
         self.show_trajectories = True
         self.show_flow = True
         self.show_heatmap = True
+        self.show_predictions = True
+        self.show_legend = True
         logger.info("VideoWorker initialized successfully")
 
     def add_camera(self, camera_id, video_path=None, calibration_points=None):
@@ -481,6 +477,12 @@ class VideoWorker(QtCore.QObject):
                         annotated, f"ID:{track.local_id}", (x1, max(15, y1-10)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, camera.color, 2
                     )
+                    
+                    # Draw foot position marker (yellow circle at bottom center)
+                    foot_x = int((x1 + x2) / 2)
+                    foot_y = y2
+                    cv2.circle(annotated, (foot_x, foot_y), 5, (0, 255, 255), -1)
+                    
                 except Exception as track_error:
                     logger.debug(f"Error drawing track: {track_error}")
                     continue
@@ -520,6 +522,9 @@ class VideoWorker(QtCore.QObject):
             
             self._draw_tracks(topdown, all_tracks)
             self._draw_statistics(topdown)
+            
+            if self.show_legend:
+                self._draw_legend(topdown)
             
             return topdown
         except Exception as e:
@@ -621,7 +626,7 @@ class VideoWorker(QtCore.QObject):
                 px, py = vu.world_to_topdown(wx, wy, self.S)
                 
                 if hasattr(track, 'merged_from'):
-                    color = (255, 0, 255)
+                    color = (255, 0, 255)  # Magenta for merged
                     thickness = 3
                 else:
                     camera = self.cameras.get(track.camera_id)
@@ -631,9 +636,13 @@ class VideoWorker(QtCore.QObject):
                 cv2.circle(topdown, (px, py), 8, color, thickness)
                 cv2.circle(topdown, (px, py), 10, (255, 255, 255), 1)
                 
+                # Draw ID with white outline for better visibility
                 cv2.putText(topdown, str(track.global_id), (px+12, py-8),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(topdown, str(track.global_id), (px+12, py-8),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
                 
+                # Draw trajectory
                 if self.show_trajectories:
                     trajectory = self.crowd_analyzer.get_trajectory(track.global_id)
                     if len(trajectory) > 1:
@@ -643,6 +652,20 @@ class VideoWorker(QtCore.QObject):
                             alpha = i / len(trajectory)
                             fade_color = tuple(int(c * (0.3 + 0.7 * alpha)) for c in color)
                             cv2.line(topdown, pt1, pt2, fade_color, 2)
+                
+                # Draw prediction
+                if self.show_predictions:
+                    pred_pos = self.crowd_analyzer.predict_position(
+                        track.global_id, 
+                        config.PREDICTION_HORIZON if hasattr(config, 'PREDICTION_HORIZON') else 1.0
+                    )
+                    if pred_pos:
+                        pred_px, pred_py = vu.world_to_topdown(pred_pos[0], pred_pos[1], self.S)
+                        # Blue circle for predicted position
+                        cv2.circle(topdown, (pred_px, pred_py), 6, (0, 200, 255), 1)
+                        # Line connecting current to predicted
+                        cv2.line(topdown, (px, py), (pred_px, pred_py), (0, 200, 255), 1)
+                        
         except Exception as e:
             logger.error(f"Error drawing tracks: {e}")
 
@@ -654,7 +677,8 @@ class VideoWorker(QtCore.QObject):
                 f"Frame: {self.frame_count}",
                 f"Cameras: {len(self.cameras)}",
                 f"People: {stats['current_count']}",
-                f"Total: {stats['total_unique']}"
+                f"Total: {stats['total_unique']}",
+                f"Heatmap: {self.crowd_analyzer.heatmap_min_people}-{self.crowd_analyzer.heatmap_max_people}"
             ]
             
             y_offset = 30
@@ -662,7 +686,45 @@ class VideoWorker(QtCore.QObject):
                 (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
                 cv2.rectangle(topdown, (8, y_offset + i*25 - 18), 
                              (tw + 12, y_offset + i*25 + 5), (0, 0, 0), -1)
+                # White outline
+                cv2.putText(topdown, text, (10, y_offset + i*25),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+                # Green fill
                 cv2.putText(topdown, text, (10, y_offset + i*25),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
         except Exception as e:
             logger.error(f"Error drawing statistics: {e}")
+    
+    def _draw_legend(self, topdown):
+        """Draw color-coded legend"""
+        try:
+            legend_y = self.output_h - 100
+            legend_x = 10
+            
+            # Background box
+            cv2.rectangle(topdown, (legend_x - 2, legend_y - 5), 
+                         (legend_x + 200, self.output_h - 8), (0, 0, 0), -1)
+            
+            # Title
+            cv2.putText(topdown, "Legend:", (legend_x + 5, legend_y + 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            
+            # Get list of cameras for legend
+            camera_list = list(self.cameras.items())
+            
+            # Draw legend entries for each camera
+            for idx, (cam_id, camera) in enumerate(camera_list[:3]):  # Limit to 3 for space
+                y_pos = legend_y + 30 + (idx * 20)
+                cv2.circle(topdown, (legend_x + 10, y_pos), 6, camera.color, 2)
+                cv2.putText(topdown, cam_id, (legend_x + 25, y_pos + 3),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1, cv2.LINE_AA)
+            
+            # Merged tracks legend
+            if len(camera_list) > 1:
+                y_pos = legend_y + 30 + (min(len(camera_list), 3) * 20)
+                cv2.circle(topdown, (legend_x + 10, y_pos), 6, (255, 0, 255), 3)
+                cv2.putText(topdown, "Merged", (legend_x + 25, y_pos + 3),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1, cv2.LINE_AA)
+            
+        except Exception as e:
+            logger.error(f"Error drawing legend: {e}")
