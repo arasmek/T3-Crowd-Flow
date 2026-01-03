@@ -25,7 +25,7 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("Initializing MainWindow")
         self.log_filename = log_filename
         self.setWindowTitle(f"Multi-Camera Crowd Analysis - Log: {log_filename}")
-        self.resize(1600, 900)
+        self.resize(1800, 900)
         
         self.camera_widgets = {}
         self.camera_counter = 0
@@ -52,103 +52,123 @@ class MainWindow(QtWidgets.QMainWindow):
         self._auto_load_videos()
     
     def _setup_ui(self):
-        """Setup the main UI"""
+        """Setup the main UI with new layout"""
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
         
-        # Camera management section
-        camera_mgmt_layout = QtWidgets.QHBoxLayout()
-        main_layout.addLayout(camera_mgmt_layout)
+        # Main content area - horizontal split
+        content_layout = QtWidgets.QHBoxLayout()
+        main_layout.addLayout(content_layout)
         
-        camera_mgmt_layout.addWidget(QtWidgets.QLabel("Cameras:"))
-        self.btn_add_camera = QtWidgets.QPushButton("+ Add Camera")
-        self.btn_add_camera.clicked.connect(self.on_add_camera)
-        camera_mgmt_layout.addWidget(self.btn_add_camera)
-        camera_mgmt_layout.addStretch()
-        
-        # Scrollable area for camera feeds
-        self.camera_scroll = QtWidgets.QScrollArea()
-        self.camera_scroll.setWidgetResizable(True)
-        self.camera_scroll.setMinimumHeight(300)
-        
-        self.camera_container = QtWidgets.QWidget()
-        self.camera_layout = QtWidgets.QHBoxLayout(self.camera_container)
-        self.camera_scroll.setWidget(self.camera_container)
-        main_layout.addWidget(self.camera_scroll)
-        
-        # Top-down display
-        topdown_layout = QtWidgets.QHBoxLayout()
-        main_layout.addLayout(topdown_layout)
+        # LEFT SIDE: Top-down display
+        left_widget = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         
         self.labelTD = QtWidgets.QLabel("Top-Down Heatmap View")
-        self.labelTD.setFixedSize(800, 600)
-        self.labelTD.setStyleSheet("background:black; color:white;")
+        self.labelTD.setMinimumSize(900, 700)
+        self.labelTD.setStyleSheet("background:black; color:white; border: 2px solid #444;")
         self.labelTD.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        topdown_layout.addWidget(self.labelTD)
-        topdown_layout.addStretch()
-
+        left_layout.addWidget(self.labelTD)
+        
+        content_layout.addWidget(left_widget, stretch=2)
+        
+        # RIGHT SIDE: Camera feeds only
+        right_widget = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(10, 0, 0, 0)
+        
+        # Camera management header
+        camera_header = QtWidgets.QHBoxLayout()
+        camera_header.addWidget(QtWidgets.QLabel("<b>Camera Feeds</b>"))
+        self.btn_add_camera = QtWidgets.QPushButton("+ Add Camera")
+        self.btn_add_camera.clicked.connect(self.on_add_camera)
+        camera_header.addWidget(self.btn_add_camera)
+        right_layout.addLayout(camera_header)
+        
+        # Scrollable area for camera feeds (VERTICAL)
+        self.camera_scroll = QtWidgets.QScrollArea()
+        self.camera_scroll.setWidgetResizable(True)
+        self.camera_scroll.setMinimumWidth(400)
+        self.camera_scroll.setStyleSheet("QScrollArea { border: 1px solid #ccc; }")
+        
+        self.camera_container = QtWidgets.QWidget()
+        self.camera_layout = QtWidgets.QVBoxLayout(self.camera_container)
+        self.camera_layout.addStretch()  # Push cameras to top
+        self.camera_scroll.setWidget(self.camera_container)
+        right_layout.addWidget(self.camera_scroll, stretch=1)
+        
+        content_layout.addWidget(right_widget, stretch=1)
+        
+        # BOTTOM: Processing settings and controls
+        bottom_controls = QtWidgets.QHBoxLayout()
+        main_layout.addLayout(bottom_controls)
+        
         # Model and confidence controls
-        controls_layout = QtWidgets.QHBoxLayout()
-        main_layout.addLayout(controls_layout)
-        
-        controls_layout.addWidget(QtWidgets.QLabel("Model:"))
+        model_layout = QtWidgets.QHBoxLayout()
+        model_layout.addWidget(QtWidgets.QLabel("Model:"))
         self.model_path_edit = QtWidgets.QLineEdit(config.YOLO_MODEL_PATH)
-        controls_layout.addWidget(self.model_path_edit)
+        self.model_path_edit.setMaximumWidth(300)
+        model_layout.addWidget(self.model_path_edit)
         
-        controls_layout.addWidget(QtWidgets.QLabel("Confidence:"))
+        model_layout.addWidget(QtWidgets.QLabel("Confidence:"))
         self.conf_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.conf_slider.setRange(1, 99)
         self.conf_slider.setValue(40)
         self.conf_slider.setMaximumWidth(150)
         self.conf_label = QtWidgets.QLabel("0.40")
         self.conf_slider.valueChanged.connect(lambda v: self.conf_label.setText(f"{v/100:.2f}"))
-        controls_layout.addWidget(self.conf_slider)
-        controls_layout.addWidget(self.conf_label)
-
-        controls_layout.addWidget(QtWidgets.QLabel("Heatmap Max:"))
-        self.heatmap_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.heatmap_slider.setRange(1, 20)
-        self.heatmap_slider.setValue(5)
-        self.heatmap_slider.setMaximumWidth(150)
-        self.heatmap_label = QtWidgets.QLabel("5")
-        self.heatmap_slider.valueChanged.connect(self.on_heatmap_change)
-        controls_layout.addWidget(self.heatmap_slider)
-        controls_layout.addWidget(self.heatmap_label)
-
+        model_layout.addWidget(self.conf_slider)
+        model_layout.addWidget(self.conf_label)
+        bottom_controls.addLayout(model_layout)
+        
+        bottom_controls.addStretch()
+        
         # Control buttons
         buttons_layout = QtWidgets.QHBoxLayout()
-        main_layout.addLayout(buttons_layout)
         
-        self.btn_start = QtWidgets.QPushButton("Start Processing")
+        self.btn_start = QtWidgets.QPushButton("▶ Start")
         self.btn_start.clicked.connect(self.on_start)
-        self.btn_pause = QtWidgets.QPushButton("Pause")
+        self.btn_pause = QtWidgets.QPushButton("⏸ Pause")
         self.btn_pause.clicked.connect(self.on_pause)
         self.btn_pause.setEnabled(False)
-        self.btn_resume = QtWidgets.QPushButton("Resume")
+        self.btn_resume = QtWidgets.QPushButton("▶ Resume")
         self.btn_resume.clicked.connect(self.on_resume)
         self.btn_resume.setEnabled(False)
-        self.btn_stop = QtWidgets.QPushButton("Stop")
+        self.btn_stop = QtWidgets.QPushButton("⏹ Stop")
         self.btn_stop.clicked.connect(self.on_stop)
         self.btn_stop.setEnabled(False)
         
-        self.btn_toggle_trails = QtWidgets.QPushButton("Toggle Trails")
-        self.btn_toggle_trails.clicked.connect(self.on_toggle_trails)
-        self.btn_toggle_flow = QtWidgets.QPushButton("Toggle Flow")
-        self.btn_toggle_flow.clicked.connect(self.on_toggle_flow)
-        self.btn_toggle_heatmap = QtWidgets.QPushButton("Toggle Heatmap")
-        self.btn_toggle_heatmap.clicked.connect(self.on_toggle_heatmap)
-
         buttons_layout.addWidget(self.btn_start)
         buttons_layout.addWidget(self.btn_pause)
         buttons_layout.addWidget(self.btn_resume)
         buttons_layout.addWidget(self.btn_stop)
+        
+        self.btn_toggle_trails = QtWidgets.QPushButton("Trails")
+        self.btn_toggle_trails.setCheckable(True)
+        self.btn_toggle_trails.setChecked(True)
+        self.btn_toggle_trails.clicked.connect(self.on_toggle_trails)
+        
+        self.btn_toggle_flow = QtWidgets.QPushButton("Flow")
+        self.btn_toggle_flow.setCheckable(True)
+        self.btn_toggle_flow.setChecked(True)
+        self.btn_toggle_flow.clicked.connect(self.on_toggle_flow)
+        
+        self.btn_toggle_heatmap = QtWidgets.QPushButton("Heatmap")
+        self.btn_toggle_heatmap.setCheckable(True)
+        self.btn_toggle_heatmap.setChecked(True)
+        self.btn_toggle_heatmap.clicked.connect(self.on_toggle_heatmap)
+        
         buttons_layout.addWidget(self.btn_toggle_trails)
         buttons_layout.addWidget(self.btn_toggle_flow)
         buttons_layout.addWidget(self.btn_toggle_heatmap)
-        buttons_layout.addStretch()
-
+        
+        bottom_controls.addLayout(buttons_layout)
+        
+        # Status bar at bottom
         self.status = QtWidgets.QLabel(f"Ready. Logging to: {self.log_filename}")
+        self.status.setStyleSheet("padding: 5px; background: #333; color: #fff; border-top: 1px solid #555;")
         main_layout.addWidget(self.status)
     
     def _setup_worker(self):
@@ -203,7 +223,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     widget.btn_upload_calib.clicked.connect(lambda checked, cid=camera_id: self.on_upload_calibration_image(cid))
                     widget.btn_remove.clicked.connect(lambda checked, cid=camera_id: self.on_remove_camera(cid))
                     
-                    self.camera_layout.addWidget(widget)
+                    # Insert before the stretch
+                    self.camera_layout.insertWidget(self.camera_layout.count() - 1, widget)
                     self.camera_widgets[camera_id] = widget
                     
                     # Add to worker with camera-specific calibration
@@ -309,7 +330,8 @@ class MainWindow(QtWidgets.QMainWindow):
             widget.btn_upload_calib.clicked.connect(lambda: self.on_upload_calibration_image(camera_id))
             widget.btn_remove.clicked.connect(lambda: self.on_remove_camera(camera_id))
             
-            self.camera_layout.addWidget(widget)
+            # Insert before the stretch
+            self.camera_layout.insertWidget(self.camera_layout.count() - 1, widget)
             self.camera_widgets[camera_id] = widget
             
             self.worker.add_camera(camera_id, calibration_points=self.default_calibration)
@@ -542,10 +564,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.show_heatmap = not self.worker.show_heatmap
         status = "ON" if self.worker.show_heatmap else "OFF"
         self.update_status(f"Heatmap: {status}")
-
-    def on_heatmap_change(self, value):
-        self.heatmap_label.setText(str(value))
-        self.worker.crowd_analyzer.heatmap_max_people = value
 
     def on_finished(self):
         """Handle processing finished"""
