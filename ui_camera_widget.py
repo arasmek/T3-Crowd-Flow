@@ -30,8 +30,10 @@ class CameraWidget(QtWidgets.QWidget):
         # First row of controls
         control_layout1 = QtWidgets.QHBoxLayout()
         self.btn_load = QtWidgets.QPushButton("Load Video")
+        self.btn_load_stream = QtWidgets.QPushButton("Load Stream")
         self.btn_remove = QtWidgets.QPushButton("Remove")
         control_layout1.addWidget(self.btn_load)
+        control_layout1.addWidget(self.btn_load_stream)
         control_layout1.addWidget(self.btn_remove)
         layout.addLayout(control_layout1)
         

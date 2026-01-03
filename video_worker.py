@@ -190,7 +190,14 @@ class VideoWorker(QtCore.QObject):
             # Initialize video captures for all cameras
             for cam_id, camera in self.cameras.items():
                 logger.info(f"Opening video capture for {cam_id}: {camera.video_path}")
-                camera.capture = cv2.VideoCapture(camera.video_path)
+                
+                # Handle different video source types
+                if camera.video_path.isdigit():
+                    # Webcam/device index
+                    camera.capture = cv2.VideoCapture(int(camera.video_path))
+                else:
+                    # File path or stream URL
+                    camera.capture = cv2.VideoCapture(camera.video_path)
                 
                 if not camera.capture.isOpened():
                     raise ValueError(f"Could not open video for camera {cam_id}: {camera.video_path}")
@@ -200,7 +207,15 @@ class VideoWorker(QtCore.QObject):
                 width = int(camera.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
                 height = int(camera.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 frame_count = int(camera.capture.get(cv2.CAP_PROP_FRAME_COUNT))
-                logger.info(f"  - FPS: {fps}, Size: {width}x{height}, Frames: {frame_count}")
+                
+                # Determine if this is a stream (no frame count or device)
+                is_stream = frame_count <= 0 or camera.video_path.isdigit() or \
+                           camera.video_path.startswith(('rtmp://', 'rtsp://', 'http://', 'https://'))
+                
+                if is_stream:
+                    logger.info(f"  - Stream mode: FPS: {fps}, Size: {width}x{height}")
+                else:
+                    logger.info(f"  - File mode: FPS: {fps}, Size: {width}x{height}, Frames: {frame_count}")
                 
                 # Single camera mode: use full frame area (no calibration needed)
                 if len(self.cameras) == 1:
@@ -336,6 +351,13 @@ class VideoWorker(QtCore.QObject):
         GRID_W, GRID_H = config.GRID_W, config.GRID_H
         cell_w = config.WORLD_W / GRID_W
         cell_h = config.WORLD_H / GRID_H
+        
+        # Check if we have any streams (to handle end condition differently)
+        has_streams = any(
+            cam.video_path.isdigit() or 
+            cam.video_path.startswith(('rtmp://', 'rtsp://', 'http://', 'https://'))
+            for cam in self.cameras.values()
+        )
 
         try:
             while self._running:
@@ -365,8 +387,9 @@ class VideoWorker(QtCore.QObject):
                         if self.frame_count == 0:
                             logger.warning(f"Could not read frame from {cam_id}")
 
-                # If no cameras have frames, we're done
-                if active_cameras == 0:
+                # If no cameras have frames and we're not using streams, we're done
+                # For streams, we continue running even if temporarily no frames
+                if active_cameras == 0 and not has_streams:
                     logger.info("No more frames from any camera")
                     self.status_signal.emit("Reached end of all videos.")
                     break

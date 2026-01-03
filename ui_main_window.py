@@ -17,6 +17,170 @@ logger = logging.getLogger('CrowdAnalysis')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 
+class StreamInputDialog(QtWidgets.QDialog):
+    """Dialog for entering stream URL or selecting webcam"""
+    
+    def __init__(self, camera_id, parent=None):
+        super().__init__(parent)
+        self.camera_id = camera_id
+        self.setWindowTitle(f"Load Stream for {camera_id}")
+        self.resize(550, 300)
+        
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Instructions
+        instructions = QtWidgets.QLabel(
+            "Enter a stream URL or select a local webcam/virtual camera.\n\n"
+            "Supported formats:\n"
+            "• Webcam: 0, 1, 2, ... (device index)\n"
+            "• RTMP: rtmp://server/stream\n"
+            "• RTSP: rtsp://server/stream\n"
+            "• HTTP/HLS: http://server/stream.m3u8\n"
+            "• YouTube: Use yt-dlp to get direct stream URL (see guide)\n"
+            "• OBS Virtual Camera: Use device index (usually 0 or 1)"
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+        
+        # Stream type selector
+        type_layout = QtWidgets.QHBoxLayout()
+        type_layout.addWidget(QtWidgets.QLabel("Stream Type:"))
+        self.stream_type = QtWidgets.QComboBox()
+        self.stream_type.addItems([
+            "Custom URL",
+            "Webcam/Virtual Camera (0)",
+            "Webcam/Virtual Camera (1)",
+            "Webcam/Virtual Camera (2)",
+            "Webcam/Virtual Camera (3)"
+        ])
+        self.stream_type.currentIndexChanged.connect(self._on_type_changed)
+        type_layout.addWidget(self.stream_type)
+        layout.addLayout(type_layout)
+        
+        # URL/Index input
+        url_layout = QtWidgets.QHBoxLayout()
+        url_layout.addWidget(QtWidgets.QLabel("Stream URL:"))
+        self.url_input = QtWidgets.QLineEdit()
+        self.url_input.setPlaceholderText("rtmp://localhost/live/stream or rtsp://... or http://...")
+        url_layout.addWidget(self.url_input)
+        layout.addLayout(url_layout)
+        
+        # YouTube helper button
+        youtube_layout = QtWidgets.QHBoxLayout()
+        self.btn_youtube_help = QtWidgets.QPushButton("📺 YouTube Stream Help")
+        self.btn_youtube_help.clicked.connect(self._show_youtube_help)
+        youtube_layout.addWidget(self.btn_youtube_help)
+        youtube_layout.addStretch()
+        layout.addLayout(youtube_layout)
+        
+        # Buttons
+        button_layout = QtWidgets.QHBoxLayout()
+        self.btn_test = QtWidgets.QPushButton("Test Connection")
+        self.btn_test.clicked.connect(self._test_connection)
+        self.btn_ok = QtWidgets.QPushButton("OK")
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel = QtWidgets.QPushButton("Cancel")
+        self.btn_cancel.clicked.connect(self.reject)
+        
+        button_layout.addWidget(self.btn_test)
+        button_layout.addStretch()
+        button_layout.addWidget(self.btn_ok)
+        button_layout.addWidget(self.btn_cancel)
+        layout.addLayout(button_layout)
+    
+    def _on_type_changed(self, index):
+        """Handle stream type change"""
+        if index == 0:  # Custom URL
+            self.url_input.setEnabled(True)
+            self.url_input.setText("")
+            self.url_input.setPlaceholderText("rtmp://localhost/live/stream or rtsp://... or http://...")
+        else:  # Webcam
+            webcam_index = index - 1
+            self.url_input.setEnabled(False)
+            self.url_input.setText(str(webcam_index))
+    
+    def _show_youtube_help(self):
+        """Show help for YouTube livestreams"""
+        help_text = """
+YouTube Livestream Setup:
+
+1. Install yt-dlp (YouTube downloader):
+   pip install yt-dlp
+
+2. Get the direct stream URL:
+   yt-dlp -g "YOUTUBE_LIVESTREAM_URL"
+   
+   Example:
+   yt-dlp -g "https://www.youtube.com/watch?v=jfKfPfyJRdk"
+   
+3. Copy the resulting URL (starts with https://)
+
+4. Paste it into the "Stream URL" field
+
+Note: The URL expires after some time, so you may need to 
+regenerate it if the stream stops working.
+
+Alternative - Use Streamlink:
+   streamlink "YOUTUBE_URL" best --player-external-http
+   Then use: http://127.0.0.1:53422/
+"""
+        QtWidgets.QMessageBox.information(self, "YouTube Stream Help", help_text)
+    
+    def _test_connection(self):
+        """Test if the stream can be opened"""
+        stream_url = self.get_stream_url()
+        
+        if not stream_url:
+            QtWidgets.QMessageBox.warning(self, "Warning", "Please enter a stream URL")
+            return
+        
+        try:
+            # Show progress
+            progress = QtWidgets.QProgressDialog("Testing connection...", None, 0, 0, self)
+            progress.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+            progress.show()
+            QtWidgets.QApplication.processEvents()
+            
+            # Try to open the stream
+            cap = cv2.VideoCapture(stream_url if not stream_url.isdigit() else int(stream_url))
+            
+            if cap.isOpened():
+                # Try to read a frame with timeout
+                ret, frame = cap.read()
+                cap.release()
+                progress.close()
+                
+                if ret and frame is not None:
+                    QtWidgets.QMessageBox.information(
+                        self, "Success", 
+                        f"✓ Successfully connected to stream!\n"
+                        f"Resolution: {frame.shape[1]}x{frame.shape[0]}"
+                    )
+                else:
+                    QtWidgets.QMessageBox.warning(
+                        self, "Warning",
+                        "Connected to stream but couldn't read frame.\n"
+                        "Stream might not be ready yet or URL expired."
+                    )
+            else:
+                progress.close()
+                QtWidgets.QMessageBox.critical(
+                    self, "Error",
+                    "Failed to connect to stream.\n"
+                    "Please check the URL and try again.\n\n"
+                    "For YouTube streams, make sure you're using the direct stream URL\n"
+                    "obtained from yt-dlp (click 'YouTube Stream Help')"
+                )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error",
+                f"Error testing stream:\n{str(e)}"
+            )
+    
+    def get_stream_url(self):
+        """Get the entered stream URL"""
+        return self.url_input.text().strip()
+
 class MainWindow(QtWidgets.QMainWindow):
     """Main application window for multi-camera crowd analysis"""
     
@@ -219,6 +383,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     
                     widget = CameraWidget(camera_id, self)
                     widget.btn_load.clicked.connect(lambda checked, cid=camera_id: self.on_load_video(cid))
+                    widget.btn_load_stream.clicked.connect(lambda checked, cid=camera_id: self.on_load_stream(cid))
                     widget.btn_calibrate.clicked.connect(lambda checked, cid=camera_id: self.on_calibrate_camera(cid))
                     widget.btn_upload_calib.clicked.connect(lambda checked, cid=camera_id: self.on_upload_calibration_image(cid))
                     widget.btn_remove.clicked.connect(lambda checked, cid=camera_id: self.on_remove_camera(cid))
@@ -326,6 +491,7 @@ class MainWindow(QtWidgets.QMainWindow):
             
             widget = CameraWidget(camera_id, self)
             widget.btn_load.clicked.connect(lambda: self.on_load_video(camera_id))
+            widget.btn_load_stream.clicked.connect(lambda: self.on_load_stream(camera_id))
             widget.btn_calibrate.clicked.connect(lambda: self.on_calibrate_camera(camera_id))
             widget.btn_upload_calib.clicked.connect(lambda: self.on_upload_calibration_image(camera_id))
             widget.btn_remove.clicked.connect(lambda: self.on_remove_camera(camera_id))
@@ -379,6 +545,45 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.update_status(f"{camera_id}: {filename}")
         except Exception as e:
             logger.error(f"Error loading video: {e}", exc_info=True)
+
+    def on_load_stream(self, camera_id):
+        """Load live stream for a camera"""
+        try:
+            # Create stream input dialog
+            dialog = StreamInputDialog(camera_id, self)
+            
+            if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+                stream_url = dialog.get_stream_url()
+                
+                if stream_url:
+                    self.worker.update_camera_video(camera_id, stream_url)
+                    
+                    if camera_id in self.camera_widgets:
+                        # Determine stream type for display
+                        if stream_url.isdigit():
+                            display_name = f"Webcam {stream_url}"
+                        elif stream_url.startswith('rtmp://'):
+                            display_name = "RTMP Stream"
+                        elif stream_url.startswith('rtsp://'):
+                            display_name = "RTSP Stream"
+                        elif stream_url.startswith('http://') or stream_url.startswith('https://'):
+                            display_name = "HTTP/HLS Stream"
+                        else:
+                            display_name = "Live Stream"
+                        
+                        self.camera_widgets[camera_id].info_label.setText(
+                            f"Stream: {display_name}\n{stream_url[:50]}..."
+                        )
+                        
+                        # Try to get first frame for thumbnail
+                        self._display_video_thumbnail(camera_id, stream_url)
+                    
+                    # Update calibration buttons after loading
+                    self._update_calibration_buttons()
+                    self.update_status(f"{camera_id}: Stream connected")
+        except Exception as e:
+            logger.error(f"Error loading stream: {e}", exc_info=True)
+            QtWidgets.QMessageBox.critical(self, "Error", f"Failed to load stream: {str(e)}")
     
     def on_calibrate_camera(self, camera_id):
         """Open calibration window for a camera"""
