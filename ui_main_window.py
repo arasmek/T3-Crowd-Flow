@@ -149,7 +149,7 @@ regenerate it if the stream stops working.
                 if ret and frame is not None:
                     QtWidgets.QMessageBox.information(
                         self, "Success", 
-                        f"✓ Successfully connected to stream!\n"
+                        f"Successfully connected to stream!\n"
                         f"Resolution: {frame.shape[1]}x{frame.shape[0]}"
                     )
                 else:
@@ -193,12 +193,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Different calibration points for each camera
         # Format: [bottom-left, top-left, top-right, bottom-right]
-        self.camera_calibrations = {
-            "camA.mp4": [[289, 577], [689, 156], [1102, 174], [1236, 680]],
-            "camB.mp4": [[14, 691], [126, 233], [477, 207], [801, 544]],
-            "camC.mp4": [[289, 577], [689, 156], [1102, 174], [1236, 680]],
-            "camD.mp4": [[289, 577], [689, 156], [1102, 174], [1236, 680]],
-        }
+
         
         # Default calibration for manually added cameras
         self.default_calibration = [[289, 577], [689, 156], [1102, 174], [1236, 680]]

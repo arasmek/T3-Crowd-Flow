@@ -460,12 +460,15 @@ class VideoWorker(QtCore.QObject):
                 logger.info(f"Late initialization of tracker for {cam_id}")
                 self.tracker.original_dims[cam_id] = None
             
-            # Run YOLO detection
+            # ========== IMPORTANT: Resize frame for inference ==========
+            frameResized, scale_x, scale_y = self.tracker.resize_frame_for_inference(frame)
+            
+            # Run YOLO detection on RESIZED frame
             results = self.yolo_model.track(
-                frame, 
+                frameResized,  # Use resized frame
                 conf=self.conf, 
                 classes=[0],
-                persist=True,
+                persist=False,  # Changed from True to False (like original)
                 verbose=False
             )
             
@@ -477,12 +480,24 @@ class VideoWorker(QtCore.QObject):
                 return tracks
             
             if len(results[0].boxes) > 0:
+                # ========== IMPORTANT: Scale detections back to original frame size ==========
+                scaled_boxes = self.tracker.scale_detections(results[0].boxes, scale_x, scale_y)
+                
+                # Create temporary detection objects with scaled coordinates
+                class ScaledBox:
+                    def __init__(self, xyxy, conf):
+                        self.xyxy = [np.array(xyxy)]
+                        self.conf = [conf]
+                
+                scaled_detection_objects = [ScaledBox(box['xyxy'], box['conf']) for box in scaled_boxes]
+                
+                # Update tracker with ORIGINAL frame and SCALED detections
                 tracks = self.tracker.update_tracks(
-                    results[0].boxes, frame, cam_id, 
+                    scaled_detection_objects, frame, cam_id, 
                     camera.homography, (config.WORLD_W, config.WORLD_H)
                 )
             
-            # Annotate frame
+            # Annotate ORIGINAL frame (not resized)
             annotated = frame.copy()
             
             for track in tracks:
@@ -501,7 +516,7 @@ class VideoWorker(QtCore.QObject):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, camera.color, 2
                     )
                     
-                    # Draw foot position marker (yellow circle at bottom center)
+                    # Draw foot point (for world coordinate mapping)
                     foot_x = int((x1 + x2) / 2)
                     foot_y = y2
                     cv2.circle(annotated, (foot_x, foot_y), 5, (0, 255, 255), -1)
