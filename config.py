@@ -11,7 +11,7 @@ VIDEO_A = "data/camA.mp4"
 VIDEO_B = "data/camB.mp4"
 
 # Model paths
-YOLO_MODEL_PATH = "yolov8s.pt"
+YOLO_MODEL_PATH = "yolov9s.pt"
 DEEPSORT_MODEL_PATH = "deep_sort/deep/checkpoint/ckpt.t7"
 
 # Homography paths

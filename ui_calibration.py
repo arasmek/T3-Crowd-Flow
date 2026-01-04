@@ -41,7 +41,7 @@ class CalibrationWindow(QtWidgets.QDialog):
         # Instructions
         self.instructions = QtWidgets.QLabel()
         self.update_instructions()
-        self.instructions.setStyleSheet("background: yellow; padding: 10px; font-weight: bold;")
+        self.instructions.setStyleSheet("background: gray; padding: 10px; font-weight: bold;")
         self.instructions.setWordWrap(True)
         layout.addWidget(self.instructions)
         
@@ -61,7 +61,7 @@ class CalibrationWindow(QtWidgets.QDialog):
         mode_layout.addStretch()
         
         # Detection settings button
-        self.btn_detect_settings = QtWidgets.QPushButton("⚙️ Detection Settings")
+        self.btn_detect_settings = QtWidgets.QPushButton("Detection Settings")
         self.btn_detect_settings.clicked.connect(self.show_detection_settings)
         mode_layout.addWidget(self.btn_detect_settings)
         
@@ -83,7 +83,7 @@ class CalibrationWindow(QtWidgets.QDialog):
         # Buttons
         button_layout = QtWidgets.QHBoxLayout()
         
-        self.btn_detect = QtWidgets.QPushButton("🔍 Run Detection")
+        self.btn_detect = QtWidgets.QPushButton("Run Detection")
         self.btn_detect.clicked.connect(self.run_detection)
         button_layout.addWidget(self.btn_detect)
         
@@ -93,7 +93,7 @@ class CalibrationWindow(QtWidgets.QDialog):
         
         button_layout.addStretch()
         
-        self.btn_save = QtWidgets.QPushButton("✓ Save Calibration")
+        self.btn_save = QtWidgets.QPushButton("Save Calibration")
         self.btn_save.clicked.connect(self.accept)
         button_layout.addWidget(self.btn_save)
         
@@ -107,14 +107,14 @@ class CalibrationWindow(QtWidgets.QDialog):
         """Update instruction text based on mode"""
         if self.detection_mode == "auto":
             text = (
-                "AUTO-DETECT MODE: Click '🔍 Run Detection' to find edges and corners automatically.\n"
+                "AUTO-DETECT MODE: Click 'Run Detection' to find edges and corners automatically.\n"
                 "Then click near detected features (shown in green) to select calibration points.\n"
-                "Order: 1. Bottom-Left → 2. Top-Left → 3. Top-Right → 4. Bottom-Right"
+                "Order: 1. Bottom-Left > 2. Top-Left > 3. Top-Right > 4. Bottom-Right"
             )
         else:
             text = (
                 "MANUAL MODE: Click 4 points in this order:\n"
-                "1. Bottom-Left → 2. Top-Left → 3. Top-Right → 4. Bottom-Right\n"
+                "1. Bottom-Left > 2. Top-Left > 3. Top-Right > 4. Bottom-Right\n"
                 "(These should form the area you want to map to the world coordinates)"
             )
         self.instructions.setText(text)
@@ -173,7 +173,7 @@ class CalibrationWindow(QtWidgets.QDialog):
             
             # Update info
             info_text = (
-                f"✓ Detected: {len(self.detected_corners)} corners, "
+                f"Detected: {len(self.detected_corners)} corners, "
                 f"{len(self.detected_lines)} lines, "
                 f"{len(self.detected_intersections)} intersections"
             )

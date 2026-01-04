@@ -67,7 +67,7 @@ class StreamInputDialog(QtWidgets.QDialog):
         
         # YouTube helper button
         youtube_layout = QtWidgets.QHBoxLayout()
-        self.btn_youtube_help = QtWidgets.QPushButton("📺 YouTube Stream Help")
+        self.btn_youtube_help = QtWidgets.QPushButton("YouTube Stream Help")
         self.btn_youtube_help.clicked.connect(self._show_youtube_help)
         youtube_layout.addWidget(self.btn_youtube_help)
         youtube_layout.addStretch()
@@ -119,10 +119,6 @@ YouTube Livestream Setup:
 
 Note: The URL expires after some time, so you may need to 
 regenerate it if the stream stops working.
-
-Alternative - Use Streamlink:
-   streamlink "YOUTUBE_URL" best --player-external-http
-   Then use: http://127.0.0.1:53422/
 """
         QtWidgets.QMessageBox.information(self, "YouTube Stream Help", help_text)
     
@@ -213,7 +209,7 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("MainWindow initialized")
         
         # Auto-load videos from data/ directory
-        self._auto_load_videos()
+        #self._auto_load_videos()
     
     def _setup_ui(self):
         """Setup the main UI with new layout"""
@@ -292,15 +288,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # Control buttons
         buttons_layout = QtWidgets.QHBoxLayout()
         
-        self.btn_start = QtWidgets.QPushButton("▶ Start")
+        self.btn_start = QtWidgets.QPushButton("Start")
         self.btn_start.clicked.connect(self.on_start)
-        self.btn_pause = QtWidgets.QPushButton("⏸ Pause")
+        self.btn_pause = QtWidgets.QPushButton("Pause")
         self.btn_pause.clicked.connect(self.on_pause)
         self.btn_pause.setEnabled(False)
-        self.btn_resume = QtWidgets.QPushButton("▶ Resume")
+        self.btn_resume = QtWidgets.QPushButton("Resume")
         self.btn_resume.clicked.connect(self.on_resume)
         self.btn_resume.setEnabled(False)
-        self.btn_stop = QtWidgets.QPushButton("⏹ Stop")
+        self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_stop.clicked.connect(self.on_stop)
         self.btn_stop.setEnabled(False)
         
