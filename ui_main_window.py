@@ -1,7 +1,7 @@
-# ui_main_window.py - Main application window
 import os
 import logging
 import cv2
+import numpy as np
 from PyQt6 import QtCore, QtWidgets
 from PyQt6.QtGui import QPixmap
 
@@ -18,8 +18,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 
 class StreamInputDialog(QtWidgets.QDialog):
-    """Dialog for entering stream URL or selecting webcam"""
-    
     def __init__(self, camera_id, parent=None):
         super().__init__(parent)
         self.camera_id = camera_id
@@ -123,7 +121,6 @@ regenerate it if the stream stops working.
         QtWidgets.QMessageBox.information(self, "YouTube Stream Help", help_text)
     
     def _test_connection(self):
-        """Test if the stream can be opened"""
         stream_url = self.get_stream_url()
         
         if not stream_url:
@@ -174,11 +171,9 @@ regenerate it if the stream stops working.
             )
     
     def get_stream_url(self):
-        """Get the entered stream URL"""
         return self.url_input.text().strip()
 
 class MainWindow(QtWidgets.QMainWindow):
-    """Main application window for multi-camera crowd analysis"""
     
     def __init__(self, log_filename):
         super().__init__()
@@ -189,11 +184,14 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.camera_widgets = {}
         self.camera_counter = 0
-        self.calib_images = {}  # Store paths to calibration images
+        self.calib_images = {}
         
-        # Different calibration points for each camera
-        # Format: [bottom-left, top-left, top-right, bottom-right]
-
+        self.world_pts = np.array([
+            [0, 0], 
+            [0, config.WORLD_H], 
+            [config.WORLD_W, config.WORLD_H], 
+            [config.WORLD_W, 0]
+        ], np.float32)
         
         # Default calibration for manually added cameras
         self.default_calibration = [[289, 577], [689, 156], [1102, 174], [1236, 680]]
@@ -202,12 +200,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_worker()
         
         logger.info("MainWindow initialized")
-        
-        # Auto-load videos from data/ directory
-        #self._auto_load_videos()
     
     def _setup_ui(self):
-        """Setup the main UI with new layout"""
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
@@ -229,7 +223,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         content_layout.addWidget(left_widget, stretch=2)
         
-        # RIGHT SIDE: Camera feeds only
+        # Camera feeds only
         right_widget = QtWidgets.QWidget()
         right_layout = QtWidgets.QVBoxLayout(right_widget)
         right_layout.setContentsMargins(10, 0, 0, 0)
@@ -250,13 +244,13 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.camera_container = QtWidgets.QWidget()
         self.camera_layout = QtWidgets.QVBoxLayout(self.camera_container)
-        self.camera_layout.addStretch()  # Push cameras to top
+        self.camera_layout.addStretch()
         self.camera_scroll.setWidget(self.camera_container)
         right_layout.addWidget(self.camera_scroll, stretch=1)
         
         content_layout.addWidget(right_widget, stretch=1)
         
-        # BOTTOM: Processing settings and controls
+        # Processing settings and controls
         bottom_controls = QtWidgets.QHBoxLayout()
         main_layout.addLayout(bottom_controls)
         
@@ -327,7 +321,6 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(self.status)
     
     def _setup_worker(self):
-        """Setup the video worker"""
         self.worker = VideoWorker()
         self.worker.frame_updated.connect(self.on_frame_update)
         self.worker.topdown_signal.connect(self.update_topdown)
@@ -335,106 +328,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.error_signal.connect(self.on_error)
         self.worker.finished.connect(self.on_finished)
     
-    def _auto_load_videos(self):
-        """Automatically load videos from data/ directory"""
-        try:
-            video_files = [
-                ("camA.mp4", "camA_calib.jpg", "Camera A"),
-                ("camB.mp4", "camB_calib.jpg", "Camera B"),
-                ("camC.mp4", "camC_calib.jpg", "Camera C"),
-                ("camD.mp4", "camD_calib.jpg", "Camera D")
-            ]
-            
-            loaded_count = 0
-            for video_file, calib_image, display_name in video_files:
-                video_path = os.path.join(DATA_DIR, video_file)
-                calib_image_path = os.path.join(DATA_DIR, calib_image)
-                
-                if os.path.exists(video_path):
-                    logger.info(f"Auto-loading: {video_path}")
-                    
-                    # Check if calibration image exists
-                    calibration = None
-                    calib_source = "default"
-                    
-                    if os.path.exists(calib_image_path):
-                        logger.info(f"Found calibration image: {calib_image_path}")
-                        calibration = self.default_calibration
-                        calib_source = "image"
-                    else:
-                        # Use predefined calibration if available
-                        calibration = self.camera_calibrations.get(video_file, self.default_calibration)
-                        calib_source = "predefined"
-                    
-                    logger.info(f"Using {calib_source} calibration for {video_file}")
-                    
-                    # Add camera
-                    camera_id = f"CAM_{self.camera_counter}"
-                    self.camera_counter += 1
-                    
-                    widget = CameraWidget(camera_id, self)
-                    widget.btn_load.clicked.connect(lambda checked, cid=camera_id: self.on_load_video(cid))
-                    widget.btn_load_stream.clicked.connect(lambda checked, cid=camera_id: self.on_load_stream(cid))
-                    widget.btn_calibrate.clicked.connect(lambda checked, cid=camera_id: self.on_calibrate_camera(cid))
-                    widget.btn_upload_calib.clicked.connect(lambda checked, cid=camera_id: self.on_upload_calibration_image(cid))
-                    widget.btn_remove.clicked.connect(lambda checked, cid=camera_id: self.on_remove_camera(cid))
-                    
-                    # Insert before the stretch
-                    self.camera_layout.insertWidget(self.camera_layout.count() - 1, widget)
-                    self.camera_widgets[camera_id] = widget
-                    
-                    # Add to worker with camera-specific calibration
-                    self.worker.add_camera(camera_id, calibration_points=calibration)
-                    
-                    # Load video
-                    self.worker.update_camera_video(camera_id, video_path)
-                    
-                    # Display thumbnail
-                    self._display_video_thumbnail(camera_id, video_path)
-                    
-                    # If calibration image exists, store it
-                    if calib_source == "image":
-                        widget.info_label.setText(f"Loaded: {video_file}\nCalibration image available - click Calibrate")
-                        self.calib_images[camera_id] = calib_image_path
-                    else:
-                        widget.info_label.setText(f"Loaded: {video_file}")
-                    
-                    loaded_count += 1
-                    logger.info(f"Auto-loaded {video_file} as {camera_id}")
-            
-            if loaded_count > 0:
-                status_msg = f"Auto-loaded {loaded_count} video(s) from data/ directory"
-                if loaded_count == 1:
-                    status_msg += " (Single camera - full frame will be used)"
-                self.update_status(status_msg)
-                logger.info(f"Auto-loading complete: {loaded_count} videos loaded")
-                
-                # Update calibration button visibility
-                self._update_calibration_buttons()
-                
-                # Show calibration prompt if calibration images were found and multiple cameras
-                if self.calib_images and loaded_count > 1:
-                    QtWidgets.QMessageBox.information(
-                        self, "Calibration Images Found",
-                        f"Found calibration images for {len(self.calib_images)} camera(s).\n"
-                        "Click 'Calibrate' button on each camera to set calibration points."
-                    )
-            else:
-                logger.info("No videos found in data/ directory for auto-loading")
-                
-        except Exception as e:
-            logger.error(f"Error during auto-load: {e}", exc_info=True)
-            self.update_status("Failed to auto-load videos - check log")
-    
     def _display_video_thumbnail(self, camera_id, video_path):
-        """Extract first frame from video and display as thumbnail"""
         try:
             cap = cv2.VideoCapture(video_path)
             ret, frame = cap.read()
             cap.release()
             
             if ret and frame is not None:
-                # Convert to QImage and display
                 qimg = cv2_to_qimage(frame)
                 if qimg and camera_id in self.camera_widgets:
                     widget = self.camera_widgets[camera_id]
@@ -453,20 +353,16 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.error(f"Error displaying thumbnail for {camera_id}: {e}", exc_info=True)
     
     def _update_calibration_buttons(self):
-        """Update calibration button visibility based on camera count"""
         is_single_camera = len(self.worker.cameras) == 1
         
         for cam_id, widget in self.camera_widgets.items():
-            # Hide/disable calibration buttons in single camera mode
             widget.btn_calibrate.setVisible(not is_single_camera)
             widget.btn_upload_calib.setVisible(not is_single_camera)
             
-            # Update info text for single camera
             if is_single_camera and cam_id in self.worker.cameras:
                 camera = self.worker.cameras[cam_id]
                 if camera.video_path:
                     filename = os.path.basename(camera.video_path)
-                    # Keep calibration info if it exists, otherwise show single camera mode
                     current_text = widget.info_label.text()
                     if "Calibration image available" not in current_text:
                         widget.info_label.setText(
@@ -475,7 +371,6 @@ class MainWindow(QtWidgets.QMainWindow):
                         )
 
     def on_add_camera(self):
-        """Add a new camera"""
         try:
             camera_id = f"CAM_{self.camera_counter}"
             self.camera_counter += 1
@@ -487,7 +382,6 @@ class MainWindow(QtWidgets.QMainWindow):
             widget.btn_upload_calib.clicked.connect(lambda: self.on_upload_calibration_image(camera_id))
             widget.btn_remove.clicked.connect(lambda: self.on_remove_camera(camera_id))
             
-            # Insert before the stretch
             self.camera_layout.insertWidget(self.camera_layout.count() - 1, widget)
             self.camera_widgets[camera_id] = widget
             
@@ -500,7 +394,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.on_error(f"Error adding camera: {str(e)}")
 
     def on_remove_camera(self, camera_id):
-        """Remove a camera"""
         try:
             if camera_id in self.camera_widgets:
                 widget = self.camera_widgets[camera_id]
@@ -515,7 +408,6 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.error(f"Error removing camera: {e}", exc_info=True)
 
     def on_load_video(self, camera_id):
-        """Load video for a camera"""
         try:
             path, _ = QtWidgets.QFileDialog.getOpenFileName(
                 self, f"Select video for {camera_id}", 
@@ -527,20 +419,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 if camera_id in self.camera_widgets:
                     filename = os.path.basename(path)
                     self.camera_widgets[camera_id].info_label.setText(f"Loaded: {filename}")
-                    
-                    # Extract and display thumbnail
                     self._display_video_thumbnail(camera_id, path)
                 
-                # Update calibration buttons after loading
                 self._update_calibration_buttons()
                 self.update_status(f"{camera_id}: {filename}")
         except Exception as e:
             logger.error(f"Error loading video: {e}", exc_info=True)
 
     def on_load_stream(self, camera_id):
-        """Load live stream for a camera"""
         try:
-            # Create stream input dialog
             dialog = StreamInputDialog(camera_id, self)
             
             if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
@@ -550,7 +437,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.worker.update_camera_video(camera_id, stream_url)
                     
                     if camera_id in self.camera_widgets:
-                        # Determine stream type for display
                         if stream_url.isdigit():
                             display_name = f"Webcam {stream_url}"
                         elif stream_url.startswith('rtmp://'):
@@ -565,11 +451,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.camera_widgets[camera_id].info_label.setText(
                             f"Stream: {display_name}\n{stream_url[:50]}..."
                         )
-                        
-                        # Try to get first frame for thumbnail
                         self._display_video_thumbnail(camera_id, stream_url)
                     
-                    # Update calibration buttons after loading
                     self._update_calibration_buttons()
                     self.update_status(f"{camera_id}: Stream connected")
         except Exception as e:
@@ -577,7 +460,6 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to load stream: {str(e)}")
     
     def on_calibrate_camera(self, camera_id):
-        """Open calibration window for a camera"""
         try:
             if camera_id not in self.worker.cameras:
                 QtWidgets.QMessageBox.warning(self, "Warning", f"Camera {camera_id} not found")
@@ -585,17 +467,14 @@ class MainWindow(QtWidgets.QMainWindow):
             
             camera = self.worker.cameras[camera_id]
             
-            # Check if we have a stored calibration image for this camera
             source_path = None
             is_image = False
             
             if camera_id in self.calib_images:
-                # Use calibration image
                 source_path = self.calib_images[camera_id]
                 is_image = True
                 logger.info(f"Using calibration image: {source_path}")
             elif camera.video_path:
-                # Use video first frame
                 source_path = camera.video_path
                 is_image = False
                 logger.info(f"Using video first frame: {source_path}")
@@ -606,26 +485,44 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 return
             
-            # Get current calibration points
             current_points = camera.calibration_points if camera.calibration_points else []
             
-            # Open calibration dialog
             dialog = CalibrationWindow(camera_id, source_path, current_points, is_image, self)
             
             if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
                 new_points = dialog.get_points()
                 
                 if new_points and len(new_points) == 4:
-                    # Update calibration
-                    self.worker.update_camera_calibration(camera_id, new_points)
-                    logger.info(f"Updated calibration for {camera_id}: {new_points}")
-                    self.update_status(f"Calibration updated for {camera_id}")
+                    # Compute homography using the same world points
+                    logger.info(f"Calibration points for {camera_id}: {new_points}")
+                    logger.info(f"World points: {self.world_pts.tolist()}")
                     
-                    # Update widget info
-                    if camera_id in self.camera_widgets:
-                        widget = self.camera_widgets[camera_id]
-                        current_text = widget.info_label.text().split('\n')[0]  # Keep first line
-                        widget.info_label.setText(f"{current_text}\nCalibrated ✓")
+                    # Compute homography exactly like main.py does
+                    H, status = cv2.findHomography(
+                        np.array(new_points, np.float32), 
+                        self.world_pts
+                    )
+                    
+                    if H is not None:
+                        logger.info(f"Homography computed successfully for {camera_id}")
+                        logger.debug(f"Homography matrix:\n{H}")
+                        
+                        # Update BOTH calibration points AND homography
+                        camera.calibration_points = new_points
+                        camera.homography = H
+                        
+                        self.update_status(f"Calibration updated for {camera_id}")
+                        
+                        if camera_id in self.camera_widgets:
+                            widget = self.camera_widgets[camera_id]
+                            current_text = widget.info_label.text().split('\n')[0]
+                            widget.info_label.setText(f"{current_text}\nCalibrated ✓")
+                    else:
+                        logger.error(f"Failed to compute homography for {camera_id}")
+                        QtWidgets.QMessageBox.critical(
+                            self, "Error",
+                            "Failed to compute homography from selected points"
+                        )
                 else:
                     QtWidgets.QMessageBox.warning(
                         self, "Warning",
@@ -636,13 +533,11 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Error", f"Calibration failed: {str(e)}")
     
     def on_upload_calibration_image(self, camera_id):
-        """Upload a calibration image for a camera"""
         try:
             if camera_id not in self.worker.cameras:
                 QtWidgets.QMessageBox.warning(self, "Warning", f"Camera {camera_id} not found")
                 return
             
-            # Open file dialog to select calibration image
             image_path, _ = QtWidgets.QFileDialog.getOpenFileName(
                 self, f"Select calibration image for {camera_id}",
                 "", "Image Files (*.jpg *.jpeg *.png *.bmp)"
@@ -651,7 +546,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if not image_path:
                 return
             
-            # Verify image can be loaded
             test_img = cv2.imread(image_path)
             if test_img is None:
                 QtWidgets.QMessageBox.critical(
@@ -660,21 +554,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 return
             
-            # Store the calibration image path
             self.calib_images[camera_id] = image_path
             
             logger.info(f"Uploaded calibration image for {camera_id}: {image_path}")
             
-            # Update widget info
             if camera_id in self.camera_widgets:
                 widget = self.camera_widgets[camera_id]
-                current_text = widget.info_label.text().split('\n')[0]  # Keep first line
+                current_text = widget.info_label.text().split('\n')[0]
                 filename = os.path.basename(image_path)
                 widget.info_label.setText(f"{current_text}\nCalib image: {filename}")
             
             self.update_status(f"Calibration image uploaded for {camera_id}")
             
-            # Ask if user wants to calibrate now
             reply = QtWidgets.QMessageBox.question(
                 self, "Calibrate Now?",
                 f"Calibration image uploaded for {camera_id}.\n\nDo you want to set calibration points now?",
@@ -689,18 +580,15 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Error", f"Upload failed: {str(e)}")
 
     def on_start(self):
-        """Start processing"""
         try:
             if not self.worker.cameras:
                 self.update_status("Please add at least one camera.")
                 return
             
-            # Inform user about single camera mode
             if len(self.worker.cameras) == 1:
                 self.update_status("Single camera mode - using full frame area")
                 logger.info("Starting in single camera mode")
             
-            # Reset tracking state before starting
             self.worker._reset_tracking_state()
             
             model_path = self.model_path_edit.text()
@@ -725,44 +613,37 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.error(f"Error starting: {e}", exc_info=True)
 
     def on_pause(self):
-        """Pause processing"""
         self.worker.pause()
         self.btn_pause.setEnabled(False)
         self.btn_resume.setEnabled(True)
         self.update_status("Paused")
 
     def on_resume(self):
-        """Resume processing"""
         self.worker.resume()
         self.btn_pause.setEnabled(True)
         self.btn_resume.setEnabled(False)
         self.update_status("Resumed")
 
     def on_stop(self):
-        """Stop processing"""
         self.worker.stop_processing()
         self.update_status("Stopping...")
     
     def on_toggle_trails(self):
-        """Toggle trajectory display"""
         self.worker.show_trajectories = not self.worker.show_trajectories
         status = "ON" if self.worker.show_trajectories else "OFF"
         self.update_status(f"Trajectories: {status}")
     
     def on_toggle_flow(self):
-        """Toggle flow vectors display"""
         self.worker.show_flow = not self.worker.show_flow
         status = "ON" if self.worker.show_flow else "OFF"
         self.update_status(f"Flow vectors: {status}")
     
     def on_toggle_heatmap(self):
-        """Toggle heatmap display"""
         self.worker.show_heatmap = not self.worker.show_heatmap
         status = "ON" if self.worker.show_heatmap else "OFF"
         self.update_status(f"Heatmap: {status}")
 
     def on_finished(self):
-        """Handle processing finished"""
         self.btn_start.setEnabled(True)
         self.btn_pause.setEnabled(False)
         self.btn_resume.setEnabled(False)
@@ -778,14 +659,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_status("Processing finished")
 
     def on_error(self, error_msg):
-        """Handle error"""
         logger.error(f"GUI Error: {error_msg}")
         QtWidgets.QMessageBox.critical(self, "Error", error_msg)
         self.update_status(f"Error: {error_msg}")
         self.on_finished()
 
     def on_frame_update(self, cam_id, frame):
-        """Update camera frame display"""
         try:
             if cam_id in self.camera_widgets:
                 qimg = cv2_to_qimage(frame)
@@ -804,7 +683,6 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.error(f"Error updating frame for {cam_id}: {e}")
 
     def update_topdown(self, img):
-        """Update top-down view"""
         try:
             qimg = cv2_to_qimage(img)
             if qimg is None:
@@ -821,11 +699,9 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.error(f"Error updating topdown: {e}")
 
     def update_status(self, text):
-        """Update status bar"""
         self.status.setText(text)
 
     def closeEvent(self, event):
-        """Handle window close event"""
         if self.worker._running:
             reply = QtWidgets.QMessageBox.question(
                 self, 'Confirm Exit',

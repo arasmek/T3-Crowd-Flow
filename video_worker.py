@@ -1,4 +1,3 @@
-# video_worker.py - Video processing worker thread
 import threading
 import time
 import logging
@@ -17,8 +16,6 @@ from camera_config import CameraConfig
 logger = logging.getLogger('CrowdAnalysis')
 
 class VideoWorker(QtCore.QObject):
-    """Worker thread for video processing"""
-    
     topdown_signal = QtCore.pyqtSignal(np.ndarray)
     frame_updated = QtCore.pyqtSignal(str, np.ndarray)
     status_signal = QtCore.pyqtSignal(str)
@@ -80,7 +77,6 @@ class VideoWorker(QtCore.QObject):
         logger.info("VideoWorker initialized successfully")
 
     def add_camera(self, camera_id, video_path=None, calibration_points=None):
-        """Add a new camera to the system"""
         try:
             logger.info(f"Adding camera: {camera_id}")
             camera = CameraConfig(camera_id, video_path, calibration_points)
@@ -108,7 +104,6 @@ class VideoWorker(QtCore.QObject):
             raise
 
     def remove_camera(self, camera_id):
-        """Remove a camera from the system"""
         try:
             if camera_id in self.cameras:
                 camera = self.cameras[camera_id]
@@ -125,7 +120,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error removing camera {camera_id}: {e}", exc_info=True)
 
     def update_camera_video(self, camera_id, video_path):
-        """Update video path for a camera"""
         try:
             if camera_id in self.cameras:
                 self.cameras[camera_id].video_path = video_path
@@ -134,7 +128,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error updating video for {camera_id}: {e}", exc_info=True)
 
     def update_camera_calibration(self, camera_id, calibration_points):
-        """Update calibration points for a camera"""
         try:
             if camera_id in self.cameras:
                 self.cameras[camera_id].calibration_points = calibration_points
@@ -147,7 +140,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error updating calibration for {camera_id}: {e}", exc_info=True)
 
     def start_processing(self, model_path, conf):
-        """Start processing all configured cameras"""
         try:
             logger.info("=" * 60)
             logger.info("STARTING PROCESSING")
@@ -208,7 +200,7 @@ class VideoWorker(QtCore.QObject):
                 height = int(camera.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 frame_count = int(camera.capture.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                # Determine if this is a stream (no frame count or device)
+                # Determine if this is a stream
                 is_stream = frame_count <= 0 or camera.video_path.isdigit() or \
                            camera.video_path.startswith(('rtmp://', 'rtsp://', 'http://', 'https://'))
                 
@@ -252,7 +244,6 @@ class VideoWorker(QtCore.QObject):
         self._reset_tracking_state()
     
     def _reset_tracking_state(self):
-        """Reset all tracking and analytics state"""
         logger.info("Resetting tracking state...")
         try:
             # Reinitialize tracker
@@ -279,7 +270,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error resetting tracking state: {e}", exc_info=True)
 
     def _cleanup_resources(self):
-        """Safely release all video capture resources"""
         logger.info("Cleaning up resources...")
         for cam_id, camera in self.cameras.items():
             if camera.capture is not None:
@@ -302,34 +292,55 @@ class VideoWorker(QtCore.QObject):
             logger.info("Processing resumed")
 
     def _merge_multiple_camera_tracks(self, camera_tracks_dict):
-        """Merge tracks from multiple cameras iteratively"""
         try:
-            track_lists = [tracks for tracks in camera_tracks_dict.values() if tracks]
-            
+            # Filter out empty track lists and log
+            track_lists = []
+            for cam_id, tracks in camera_tracks_dict.items():
+                if tracks:
+                    logger.debug(f"{cam_id}: {len(tracks)} tracks to merge")
+                    track_lists.append(tracks)
+                else:
+                    logger.debug(f"{cam_id}: No tracks")
+        
             if len(track_lists) == 0:
+                logger.debug("No tracks from any camera")
                 return []
             elif len(track_lists) == 1:
+                logger.debug("Single camera - no merging needed")
                 # Ensure single camera tracks have global_id
                 for track in track_lists[0]:
                     if not hasattr(track, 'global_id'):
-                        track.global_id = track.local_id
+                        if track.local_id not in self.tracker.merged_ids:
+                            self.tracker.merged_ids[track.local_id] = self.tracker.global_id_counter
+                            self.tracker.global_id_counter += 1
+                        track.global_id = self.tracker.merged_ids[track.local_id]
                 return track_lists[0]
             elif len(track_lists) == 2:
+                logger.debug("Merging 2 cameras")
                 merged = self.tracker.merge_camera_tracks(track_lists[0], track_lists[1])
                 # Ensure all merged tracks have global_id
                 for track in merged:
                     if not hasattr(track, 'global_id'):
-                        track.global_id = track.local_id
+                        if track.local_id not in self.tracker.merged_ids:
+                            self.tracker.merged_ids[track.local_id] = self.tracker.global_id_counter
+                            self.tracker.global_id_counter += 1
+                        track.global_id = self.tracker.merged_ids[track.local_id]
+                logger.debug(f"Merge result: {len(merged)} tracks")
                 return merged
             else:
                 # For 3+ cameras, merge iteratively
+                logger.debug(f"Merging {len(track_lists)} cameras iteratively")
                 merged = self.tracker.merge_camera_tracks(track_lists[0], track_lists[1])
                 for i in range(2, len(track_lists)):
                     merged = self.tracker.merge_camera_tracks(merged, track_lists[i])
                 # Ensure all merged tracks have global_id
                 for track in merged:
                     if not hasattr(track, 'global_id'):
-                        track.global_id = track.local_id
+                        if track.local_id not in self.tracker.merged_ids:
+                            self.tracker.merged_ids[track.local_id] = self.tracker.global_id_counter
+                            self.tracker.global_id_counter += 1
+                        track.global_id = self.tracker.merged_ids[track.local_id]
+                logger.debug(f"Final merge result: {len(merged)} tracks")
                 return merged
         except Exception as e:
             logger.error(f"Error merging tracks: {e}", exc_info=True)
@@ -338,12 +349,14 @@ class VideoWorker(QtCore.QObject):
             for tracks in camera_tracks_dict.values():
                 for track in tracks:
                     if not hasattr(track, 'global_id'):
-                        track.global_id = track.local_id
+                        if track.local_id not in self.tracker.merged_ids:
+                            self.tracker.merged_ids[track.local_id] = self.tracker.global_id_counter
+                            self.tracker.global_id_counter += 1
+                        track.global_id = self.tracker.merged_ids[track.local_id]
                     all_tracks.append(track)
             return all_tracks
 
     def run(self):
-        """Main processing loop"""
         logger.info("Processing loop started")
         last_time = time.time()
         frames_processed = 0
@@ -439,92 +452,97 @@ class VideoWorker(QtCore.QObject):
             self.finished.emit()
 
     def _process_camera_frame(self, cam_id, camera, frame, cell_w, cell_h):
-        """Process a single camera frame"""
         tracks = []
-        
+    
         try:
             # Validate frame
             if frame is None or frame.size == 0:
                 logger.warning(f"{cam_id}: Empty frame received")
                 return tracks
-            
+        
             # Validate homography
             if camera.homography is None:
                 logger.error(f"{cam_id}: Missing homography matrix")
                 return tracks
-            
-            # Ensure tracker knows about this camera (safety check)
-            if not hasattr(self.tracker, 'original_dims'):
-                self.tracker.original_dims = {}
-            if cam_id not in self.tracker.original_dims:
-                logger.info(f"Late initialization of tracker for {cam_id}")
-                self.tracker.original_dims[cam_id] = None
-            
-            # ========== IMPORTANT: Resize frame for inference ==========
+        
+            # Resize frame for inference
             frameResized, scale_x, scale_y = self.tracker.resize_frame_for_inference(frame)
-            
+        
             # Run YOLO detection on RESIZED frame
             results = self.yolo_model.track(
-                frameResized,  # Use resized frame
+                frameResized,
                 conf=self.conf, 
                 classes=[0],
-                persist=False,  # Changed from True to False (like original)
+                persist=False,
                 verbose=False
             )
-            
+        
             # Validate results
             if results is None or len(results) == 0:
+                logger.debug(f"{cam_id}: No YOLO results")
                 return tracks
-            
+        
             if not hasattr(results[0], 'boxes') or results[0].boxes is None:
+                logger.debug(f"{cam_id}: No boxes in results")
                 return tracks
-            
+        
             if len(results[0].boxes) > 0:
-                # ========== IMPORTANT: Scale detections back to original frame size ==========
+                logger.debug(f"{cam_id}: YOLO detected {len(results[0].boxes)} objects")
+            
+                # Scale detections back to original frame size
                 scaled_boxes = self.tracker.scale_detections(results[0].boxes, scale_x, scale_y)
-                
+            
                 # Create temporary detection objects with scaled coordinates
                 class ScaledBox:
                     def __init__(self, xyxy, conf):
                         self.xyxy = [np.array(xyxy)]
                         self.conf = [conf]
-                
+            
                 scaled_detection_objects = [ScaledBox(box['xyxy'], box['conf']) for box in scaled_boxes]
-                
+            
                 # Update tracker with ORIGINAL frame and SCALED detections
                 tracks = self.tracker.update_tracks(
                     scaled_detection_objects, frame, cam_id, 
                     camera.homography, (config.WORLD_W, config.WORLD_H)
                 )
             
-            # Annotate ORIGINAL frame (not resized)
+                logger.debug(f"{cam_id}: DeepSORT confirmed {len(tracks)} tracks")
+        
+            # Annotate ORIGINAL frame
             annotated = frame.copy()
-            
+        
             for track in tracks:
                 try:
                     ltrb = track.ltrb
                     x1, y1, x2, y2 = map(int, ltrb)
-                    
+                
                     # Bounds checking
                     h, w = annotated.shape[:2]
                     x1, y1 = max(0, min(x1, w-1)), max(0, min(y1, h-1))
                     x2, y2 = max(0, min(x2, w-1)), max(0, min(y2, h-1))
-                    
+                
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), camera.color, 2)
                     cv2.putText(
                         annotated, f"ID:{track.local_id}", (x1, max(15, y1-10)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, camera.color, 2
                     )
-                    
+                
                     # Draw foot point (for world coordinate mapping)
                     foot_x = int((x1 + x2) / 2)
                     foot_y = y2
                     cv2.circle(annotated, (foot_x, foot_y), 5, (0, 255, 255), -1)
-                    
+                
+                    # DEBUG: Draw world coordinates
+                    cv2.putText(
+                        annotated, f"W:({track.world_x:.2f},{track.world_y:.2f})", 
+                        (x1, max(30, y1-25)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1
+                    )
+                
                 except Exception as track_error:
                     logger.debug(f"Error drawing track: {track_error}")
                     continue
-            
+        
             # Draw grid
             try:
                 H_inv = np.linalg.inv(camera.homography)
@@ -535,18 +553,17 @@ class VideoWorker(QtCore.QObject):
                 )
             except np.linalg.LinAlgError as e:
                 logger.error(f"{cam_id}: Homography inversion failed: {e}")
-            
+        
             self.frame_updated.emit(cam_id, annotated)
-            
+        
         except Exception as e:
             error_msg = f"Error processing {cam_id}: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
             self.status_signal.emit(f"Error in {cam_id}: {str(e)}")
-        
+    
         return tracks
 
     def _generate_topdown_view(self, all_tracks, cell_w, cell_h):
-        """Generate the top-down view with all visualizations"""
         try:
             topdown = self.bg_faint.copy()
             
@@ -570,7 +587,6 @@ class VideoWorker(QtCore.QObject):
             return self.bg_faint.copy()
 
     def _draw_heatmap(self, topdown):
-        """Draw heatmap overlay"""
         try:
             heatmap = self.crowd_analyzer.get_density_heatmap(smooth_sigma=2.5)
             heatmap_colored = np.zeros(
@@ -621,7 +637,6 @@ class VideoWorker(QtCore.QObject):
             return topdown
 
     def _draw_grid(self, topdown, cell_w, cell_h):
-        """Draw coordinate grid"""
         try:
             for i in range(config.GRID_W + 1):
                 x = int(config.MARGIN + i * cell_w * config.SCALE)
@@ -638,7 +653,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error drawing grid: {e}")
 
     def _draw_flow_vectors(self, topdown):
-        """Draw crowd flow vectors"""
         try:
             flow_vectors = self.crowd_analyzer.get_flow_vectors()
             for vec in flow_vectors:
@@ -652,7 +666,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error drawing flow vectors: {e}")
 
     def _draw_tracks(self, topdown, all_tracks):
-        """Draw tracked people on top-down view"""
         try:
             for track in all_tracks:
                 # Ensure track has global_id (safety check)
@@ -708,7 +721,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error drawing tracks: {e}")
 
     def _draw_statistics(self, topdown):
-        """Draw statistics overlay"""
         try:
             stats = self.crowd_analyzer.get_statistics()
             info_text = [
@@ -734,7 +746,6 @@ class VideoWorker(QtCore.QObject):
             logger.error(f"Error drawing statistics: {e}")
     
     def _draw_legend(self, topdown):
-        """Draw color-coded legend"""
         try:
             legend_y = self.output_h - 100
             legend_x = 10

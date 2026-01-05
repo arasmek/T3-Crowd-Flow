@@ -174,15 +174,6 @@ class CrowdFlowAnalyzer:
         return vectors
     
     def get_density_heatmap(self, smooth_sigma=2.0):
-        """
-        Returns a smoothed density heatmap for visualization.
-        
-        Args:
-            smooth_sigma: Gaussian smoothing parameter for smooth heatmap
-            
-        Returns:
-            Smoothed density map normalized between 0 and 1
-        """
         # Apply Gaussian filter for smooth heatmap
         smoothed = gaussian_filter(self.density_map, sigma=smooth_sigma)
         
@@ -201,15 +192,6 @@ class CrowdFlowAnalyzer:
         self.heatmap_max_people = max_people
     
     def get_congestion_zones(self, threshold=0.7):
-        """
-        Identify high-density congestion zones.
-        
-        Args:
-            threshold: Density threshold (0-1) to classify as congested
-            
-        Returns:
-            List of congestion zone centers in world coordinates
-        """
         heatmap = self.get_density_heatmap()
         congestion_zones = []
         

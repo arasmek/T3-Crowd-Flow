@@ -1,11 +1,9 @@
-# main.py - Application entry point
 import sys
 import logging
 from datetime import datetime
 from PyQt6 import QtWidgets
 from ui_main_window import MainWindow
 
-# ========== LOGGING SETUP ==========
 log_filename = f"crowd_analysis_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
     level=logging.DEBUG,

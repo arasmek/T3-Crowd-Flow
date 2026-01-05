@@ -24,9 +24,9 @@ SKIP_SECONDS = 170
 DETECTION_CONFIDENCE = 0.4
 
 # Image optimization settings
-INFERENCE_WIDTH = 640  # Resize width for YOLO inference (lower = faster, less accurate)
-INFERENCE_HEIGHT = 480  # Resize height for YOLO inference
-MAINTAIN_ASPECT_RATIO = True  # Keep aspect ratio when resizing
+INFERENCE_WIDTH = 640
+INFERENCE_HEIGHT = 480
+MAINTAIN_ASPECT_RATIO = True
 
 # DeepSORT settings
 MAX_COSINE_DISTANCE = 0.3
